@@ -6,10 +6,8 @@ use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use reqwest;
+use url::Url;
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
-
-// 此功能需要使用Windows API，可以尝试使用 winapi crate
-// 或许需要编写外部的C代码或者动态链接库来完成该步骤
 // use winapi::um::winuser::{SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE, SPIF_SENDCHANGE};
 use windows::Win32::UI::WindowsAndMessaging::{SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoA, SystemParametersInfoW};
 use windows::Win32::Foundation::TRUE;
@@ -27,14 +25,26 @@ async fn download_bing_wallpaper() -> Result<String, Box<dyn std::error::Error>>
     let body = res.text().await?;
     let v: Value = serde_json::from_str(&body)?;
     let image_url = format!("https://www.bing.com{}", v["images"][0]["url"].as_str().unwrap());
+    // 解析URL
+    let parsed = Url::parse(&image_url).unwrap();
+    // 获取查询参数
+    /*for (key, value) in parsed.query_pairs() {
+        println!("{}: {}", key, value);
+    }*/
+    let id = parsed.query_pairs().find(|(key, _)| key == "id").unwrap();
+    println!("{:?}", id.1);
+    let rf = parsed.query_pairs().find(|(key, _)| key == "rf").unwrap();
+    println!("{:?}", rf.1);
 
     // 下载图片
     let response = reqwest::get(&image_url).await?;
 
     // 获取当前目录
     let current_dir = env::current_dir().expect("获取当前目录失败");
+    // 获取文件的扩展名
+    let ext = Path::new(rf.1.as_ref()).extension().and_then(|ext| ext.to_str()).unwrap_or("jpg");
     // 构建文件的绝对路径
-    let file_path = current_dir.join("bing_wallpaper.jpg");
+    let file_path = current_dir.join("bing_wallpaper.".to_owned() + ext);
     let mut file = File::create(&file_path)?;
     let content = response.bytes().await?;
     file.write_all(&content)?;

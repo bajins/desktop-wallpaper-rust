@@ -18,6 +18,8 @@ winreg = "0.52.0"
 tokio = { version = "1.36.0", features = ["rt", "rt-multi-thread", "macros"] }
 # https://github.com/reujab/wallpaper.rs
 wallpaper = "3.2.0"
+# https://github.com/servo/rust-url
+url = "2.5.0"
 
 # https://crates.io/categories/os::windows-apis
 #[target.'cfg(windows)'.dependencies]
