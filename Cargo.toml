@@ -20,6 +20,7 @@ tokio = { version = "1.36.0", features = ["rt", "rt-multi-thread", "macros"] }
 wallpaper = "3.2.0"
 # https://github.com/servo/rust-url
 url = "2.5.0"
+clap = { version = "4.5.1", features = ["derive", "cargo"] }
 
 # https://crates.io/categories/os::windows-apis
 #[target.'cfg(windows)'.dependencies]
@@ -28,12 +29,8 @@ url = "2.5.0"
 # https://github.com/microsoft/windows-rs
 [dependencies.windows]
 version = "0.52.0"
-features = [
-    "Data_Xml_Dom",
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Threading",
-    "Win32_UI_WindowsAndMessaging",
-    "System_UserProfile",
-    "Win32_System_SystemServices"
-]
+features = ["Data_Xml_Dom", "Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "System_UserProfile", "Win32_System_SystemServices", "Win32_System_Com", "Win32_System_TaskScheduler", "Win32_System_Ole", "Win32_System_Variant"]
+
+
+[build]
+rustflags = ["-C", "link-args=-Wl,--subsystem,windows"]
