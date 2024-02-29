@@ -233,12 +233,11 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         trigger6 = Some(i_idle_trigger.cast::<ITrigger>()?);*/
 
         // 创建注册触发器
-        /*let mut trigger7 = triggers.Create(TASK_TRIGGER_REGISTRATION)?;
+        let mut trigger7 = triggers.Create(TASK_TRIGGER_REGISTRATION)?;
         let i_registration_trigger: IRegistrationTrigger = trigger7.cast::<IRegistrationTrigger>()?;
         i_registration_trigger.SetId(&BSTR::from("bing_wallpaper_registration_trigger"))?;
-        i_registration_trigger.SetUserId(&BSTR::from("bajins"))?;
         i_registration_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        trigger7 = Some(i_registration_trigger.cast::<ITrigger>()?);*/
+        // trigger7 = Some(i_registration_trigger.cast::<ITrigger>()?);
 
         // 创建启动触发器
         let mut trigger8 = triggers.Create(TASK_TRIGGER_BOOT)?;
