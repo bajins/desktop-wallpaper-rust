@@ -1,19 +1,18 @@
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/config.html
-# https://zhuanlan.zhihu.com/p/69393545
 
 [build]
-#rustflags = ["-C", "link-args=-Wl,--subsystem,windows"]
+
 
 [target.'cfg(target_os = "linux")']
 rustflags = ["-C", "link-arg=-nostartfiles"]
 
 [target.'cfg(target_os = "windows")']
-# https://rust-lang.github.io/rfcs/1665-windows-subsystem.html
-# https://learn.microsoft.com/zh-cn/cpp/build/reference/subsystem-specify-subsystem
-# https://stackoverflow.com/questions/74847732/can-you-make-a-windows-desktop-app-in-rust-and-winapi
 #rustflags = ["-C", "link-args=/ENTRY:_start /SUBSYSTEM:console"]
+
+[target.x86_64-pc-windows-gnu]
+#rustflags = ["-C", "link-args=-Wl,--subsystem,windows -mwindows"]
+[target.x86_64-pc-windows-msvc]
 #rustflags = ["-C", "link-args=/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup"]
-#rustflags = ["-C", "link-args=-Wl,--subsystem,windows"]
 
 [target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-args=-e __start -static -nostartfiles"]

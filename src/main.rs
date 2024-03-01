@@ -1,5 +1,9 @@
-#![windows_subsystem = "windows"] // #!必须放在头部
+// #!必须放在头部
+// https://doc.rust-lang.org/reference/runtime.html#the-windows_subsystem-attribute
+#![windows_subsystem = "windows"]
+
 use std::{env, fs, io, mem};
+use std::error::Error;
 use std::ffi::c_void;
 use serde_json::Value;
 use std::fs::File;
@@ -31,6 +35,7 @@ async fn download_bing_wallpaper() -> Result<String, Box<dyn std::error::Error>>
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
     let body = res.text().await?;
+    println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
     let image_url = format!("https://www.bing.com{}", v["images"][0]["url"].as_str().unwrap());
     // 解析URL
@@ -157,18 +162,22 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     // let args: Vec<String> = env::args().collect();
 
     unsafe {
+        // 初始化COM库
         let com_res = CoInitializeEx(None, COINIT_MULTITHREADED);
-        assert_eq!(com_res.is_err(), true, "{}", com_res.message());
-
+        if com_res.is_err() {
+            // 初始化COM库失败
+            Err(Box::<dyn Error>::from(com_res.message()))?;
+        }
+        // 创建任务计划服务
         let task_service: ITaskService = CoCreateInstance(&TaskScheduler, None, CLSCTX_ALL)?;
-
+        // 连接到任务计划服务
         task_service.Connect(
             &VARIANT::default(),
             &VARIANT::default(),
             &VARIANT::default(),
             &VARIANT::default(),
         )?;
-
+        // 获取任务计划根文件夹
         let task_folder: ITaskFolder = task_service.GetFolder(&BSTR::from("\\"))?;
         let task_definition: ITaskDefinition = task_service.NewTask(0)?;
         let triggers: ITriggerCollection = task_definition.Triggers()?;
@@ -181,6 +190,7 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         // https://docs.microsoft.com/en-us/previous-versions//aa446887(v=vs.85)
         /*let trigger0 = triggers.Create(TASK_TRIGGER_EVENT);
         let i_event_trigger: IEventTrigger = trigger0.unwrap().cast::<IEventTrigger>()?;
+        i_event_trigger.SetId(&BSTR::from("bing_wallpaper_event_trigger"))?;
         // i_event_trigger.SetDelay(&BSTR::from("2007-01-01T08:00:00"))?;
         // i_event_trigger.SetStartBoundary(&Local::now().to_rfc3339())?;
         // 定义事件查询。触发器将启动任务，当收到事件时。
@@ -197,33 +207,31 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     </Query>
 </QueryList>"))?;*/
 
-        //
+        // 创建定时触发器
         /*let trigger1 = triggers.Create(TASK_TRIGGER_TIME)?;
         let i_time_trigger: ITimeTrigger = trigger1.cast::<ITimeTrigger>()?;
         i_time_trigger.SetId(&BSTR::from("bing_wallpaper_time_trigger"))?;
         i_time_trigger.SetEnabled(VARIANT_BOOL::from(true))?;*/
 
-        //
+        // 创建每日触发器
         /*let mut trigger2 = triggers.Create(TASK_TRIGGER_DAILY)?;
         let i_daily_trigger: IDailyTrigger = trigger2.cast::<IDailyTrigger>()?;
         i_daily_trigger.SetId(&BSTR::from("bing_wallpaper_daily_trigger"))?;
         i_daily_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        i_daily_trigger.SetDaysInterval(1)?;
-        trigger2 = Some(i_daily_trigger.cast::<ITrigger>()?);*/
+        i_daily_trigger.SetDaysInterval(1)?;*/
 
-        //
+        // 创建每周触发器
         /*let mut trigger3 = triggers.Create(TASK_TRIGGER_WEEKLY)?;
         let i_weekly_trigger: IWeeklyTrigger = trigger3.cast::<IWeeklyTrigger>()?;
         i_weekly_trigger.SetId(&BSTR::from("bing_wallpaper_weekly_trigger"))?;
-        i_weekly_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        trigger3 = Some(i_weekly_trigger.cast::<ITrigger>()?);*/
+        i_weekly_trigger.SetEnabled(VARIANT_BOOL::from(true))?;*/
 
-        //
+        // 创建每月的第一天触发器
         /*let trigger4 = triggers.Create(TASK_TRIGGER_MONTHLY)?;
         let i_monthly_trigger: IMonthlyTrigger = trigger4.cast::<IMonthlyTrigger>()?;
         i_monthly_trigger.SetDaysOfMonth(1i32)?;*/
 
-        //
+        // 创建每月的第一个星期几触发器
         /*let trigger5 = triggers.Create(TASK_TRIGGER_MONTHLYDOW)?;
         let i_monthly_dow_trigger: IMonthlyDOWTrigger = trigger5.cast::<IMonthlyDOWTrigger>()?;
         i_monthly_dow_trigger.SetDaysOfWeek(1i32)?;*/
@@ -232,33 +240,29 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         /*let mut trigger6 = triggers.Create(TASK_TRIGGER_IDLE)?;
         let i_idle_trigger: IIdleTrigger = trigger6.cast::<IIdleTrigger>()?;
         i_idle_trigger.SetId(&BSTR::from("bing_wallpaper_idle_trigger"))?;
-        i_idle_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        trigger6 = Some(i_idle_trigger.cast::<ITrigger>()?);*/
+        i_idle_trigger.SetEnabled(VARIANT_BOOL::from(true))?;*/
 
-        // 创建注册触发器
-        let mut trigger7 = triggers.Create(TASK_TRIGGER_REGISTRATION)?;
+        // 创建/修改任务时触发器
+        /*let trigger7 = triggers.Create(TASK_TRIGGER_REGISTRATION)?;
         let i_registration_trigger: IRegistrationTrigger = trigger7.cast::<IRegistrationTrigger>()?;
         i_registration_trigger.SetId(&BSTR::from("bing_wallpaper_registration_trigger"))?;
-        i_registration_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        // trigger7 = Some(i_registration_trigger.cast::<ITrigger>()?);
+        i_registration_trigger.SetEnabled(VARIANT_BOOL::from(true))?;*/
 
         // 创建启动触发器
-        let mut trigger8 = triggers.Create(TASK_TRIGGER_BOOT)?;
+        let trigger8 = triggers.Create(TASK_TRIGGER_BOOT)?;
         let i_boot_trigger: IBootTrigger = trigger8.cast::<IBootTrigger>()?;
         i_boot_trigger.SetId(&BSTR::from("bing_wallpaper_boot_trigger"))?;
         i_boot_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        // trigger8 = Some(i_boot_trigger.cast::<ITrigger>()?);
         // trigger8.SetStartBoundary(&BSTR::from("2007-01-01T08:00:00"))?;
 
         // 创建登录触发器
-        let mut trigger9 = triggers.Create(TASK_TRIGGER_LOGON)?;
+        let trigger9 = triggers.Create(TASK_TRIGGER_LOGON)?;
         let i_logon_trigger: ILogonTrigger = trigger9.cast::<ILogonTrigger>()?;
         i_logon_trigger.SetId(&BSTR::from("bing_wallpaper_logon_trigger"))?;
         i_logon_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
-        // trigger9 = Some(i_logon_trigger.cast::<ITrigger>()?);
 
         // 用于触发控制台连接或断开连接，远程连接或断开连接或工作站锁定或解锁通知的任务。
-        let mut trigger11 = triggers.Create(TASK_TRIGGER_SESSION_STATE_CHANGE);
+        let trigger11 = triggers.Create(TASK_TRIGGER_SESSION_STATE_CHANGE);
         let i_ssc_trigger: ISessionStateChangeTrigger = trigger11.unwrap()
             .cast::<ISessionStateChangeTrigger>()?;
         i_ssc_trigger.SetId(&BSTR::from("bing_wallpaper_ssc_trigger"))?;
@@ -279,11 +283,12 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         i_exec_action.SetWorkingDirectory(&BSTR::from(""))?;
         i_exec_action.SetArguments(&BSTR::from(""))?;
 
+        // 设置任务的主体
         // principal.SetUserId(&BSTR::from())?;
         principal.SetLogonType(TASK_LOGON_INTERACTIVE_TOKEN)?;
         principal.SetRunLevel(TASK_RUNLEVEL_HIGHEST)?;
 
-        //
+        // 设置任务的设置
         settings.SetEnabled(VARIANT_TRUE)?;
         settings.SetHidden(VARIANT_TRUE)?;
         // settings.SetWakeToRun(VARIANT_TRUE)?;
@@ -313,7 +318,7 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
             TASK_LOGON_INTERACTIVE_TOKEN,
             &VARIANT::default(),
         )?;
-
+        // 释放COM库
         CoUninitialize();
     }
 
