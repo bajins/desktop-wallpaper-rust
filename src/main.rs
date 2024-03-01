@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"] // #!必须放在头部
 use std::{env, fs, io, mem};
 use std::ffi::c_void;
 use serde_json::Value;
@@ -9,11 +10,10 @@ use std::rc::Rc;
 use reqwest;
 use url::Url;
 // use winapi::um::winuser::{SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE, SPIF_SENDCHANGE};
-use windows::core::{BSTR, ComInterface, GUID};
+use windows::core::{BSTR, GUID, Interface, IntoParam, VARIANT};
 use windows::Win32::UI::WindowsAndMessaging::{SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoA, SystemParametersInfoW};
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE};
 use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal, IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY, TASK_LOGON_INTERACTIVE_TOKEN, TASK_TRIGGER_TYPE2, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_CREATE_OR_UPDATE, ISessionStateChangeTrigger, TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_CUSTOM_TRIGGER_01, ITaskTrigger, TASK_RUNLEVEL_HIGHEST, TASK_INSTANCES_IGNORE_NEW, ITaskSettings2};
-use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::Com::{
     CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
@@ -21,6 +21,7 @@ use winreg::enums::*;
 use winreg::RegKey;
 use wallpaper;
 use clap::{arg, command};
+use windows::Win32::System::Variant::{VariantClear, VariantInit};
 
 // 下载必应每日一图的函数
 async fn download_bing_wallpaper() -> Result<String, Box<dyn std::error::Error>> {
@@ -121,7 +122,7 @@ fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         if result.is_err() { // 设置失败
             // 设置失败，检查错误码
             let error = GetLastError();
-            if error == ERROR_ACCESS_DENIED.ok() {
+            if error == ERROR_ACCESS_DENIED {
                 // 错误码表明权限不足
                 Ok(false)
             } else {
@@ -156,14 +157,16 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     // let args: Vec<String> = env::args().collect();
 
     unsafe {
-        CoInitializeEx(None, COINIT_MULTITHREADED)?;
+        let com_res = CoInitializeEx(None, COINIT_MULTITHREADED);
+        assert_eq!(com_res.is_err(), true, "{}", com_res.message());
 
         let task_service: ITaskService = CoCreateInstance(&TaskScheduler, None, CLSCTX_ALL)?;
+
         task_service.Connect(
-            VARIANT::default(),
-            VARIANT::default(),
-            VARIANT::default(),
-            VARIANT::default(),
+            &VARIANT::default(),
+            &VARIANT::default(),
+            &VARIANT::default(),
+            &VARIANT::default(),
         )?;
 
         let task_folder: ITaskFolder = task_service.GetFolder(&BSTR::from("\\"))?;
@@ -305,10 +308,10 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
             &BSTR::from("SetBingWallpaper"),
             &task_definition,
             TASK_CREATE_OR_UPDATE.0,
-            VARIANT::default(),
-            VARIANT::default(),
+            &VARIANT::default(),
+            &VARIANT::default(),
             TASK_LOGON_INTERACTIVE_TOKEN,
-            VARIANT::default(),
+            &VARIANT::default(),
         )?;
 
         CoUninitialize();
@@ -317,7 +320,6 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// #![windows_subsystem = "windows"]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_path = download_bing_wallpaper().await?;
@@ -347,7 +349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = cli.get_matches();
     matches.get_flag("built")*/
 
-    if let Some(_name) = matches.get_one::<bool>("taskschd") {
+    if matches.get_flag("taskschd") {
         create_schedule()?;
     }
 
