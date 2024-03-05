@@ -21,6 +21,7 @@ wallpaper = "3.2.0"
 # https://github.com/servo/rust-url
 url = "2.5.0"
 clap = { version = "4.5.1", features = ["derive", "cargo"] }
+rand = { version = "0.9.0-alpha.0", features = [] }
 
 # https://crates.io/categories/os::windows-apis
 #[target.'cfg(windows)'.dependencies]

@@ -21,17 +21,18 @@ use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTri
 use windows::Win32::System::Com::{
     CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::Variant::{VariantClear, VariantInit};
 use winreg::enums::*;
 use winreg::RegKey;
 use wallpaper;
 use clap::{arg, command};
-use windows::Win32::System::Variant::{VariantClear, VariantInit};
+use rand::Rng;
 
-// 下载必应每日一图的函数
-async fn download_bing_wallpaper() -> Result<String, Box<dyn std::error::Error>> {
+
+// 下载必应每日一图
+async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
     // Bing 壁纸API的URL
     let api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US";
-
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
     let body = res.text().await?;
@@ -49,15 +50,86 @@ async fn download_bing_wallpaper() -> Result<String, Box<dyn std::error::Error>>
     let rf = parsed.query_pairs().find(|(key, _)| key == "rf").unwrap();
     println!("{:?}", rf.1);
 
+    Ok((image_url, rf.1.to_string()))
+}
+
+//
+async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error>> {
+    // Bing 壁纸API的URL
+    let api_url = "https://arc.msn.com/v3/Delivery/Placement?pid=209567&fmt=json&cdm=1&pl=zh-CN&lc=zh-CN&ctry=CN";
+    // 发起网络请求
+    let res = reqwest::get(api_url).await?;
+    let body = res.text().await?;
+    println!("{:?}", body);
+    let v: Value = serde_json::from_str(&body)?;
+    let item: Value = serde_json::from_str(v["batchrsp"]["items"][0]["item"].as_str().unwrap())?;
+    let image_url = item["ad"]["image_fullscreen_001_landscape"]["u"].as_str().unwrap();
+
+    println!("{:?}", item["ad"]["hs1_title_text"]["tx"]);
+
+    Ok((image_url.to_string(), String::from("")))
+}
+
+// 获取Edge Chromium壁纸
+async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error>> {
+    // Bing 壁纸API的URL
+    let api_url = "https://assets.msn.cn/resolver/api/resolve/v3/config/?expType=AppConfig&expInstance=default&apptype=edgeChromium&v=20240202.634";
+    // 发起网络请求
+    let res = reqwest::get(api_url).await?;
+    let body = res.text().await?;
+    println!("{:?}", body);
+    let v: Value = serde_json::from_str(&body)?;
+    let datas = v["configs"]["BackgroundImageWC/default"]["properties"]["cmsImage"]["data"]
+        .as_array().unwrap();
+    // 随机获取一张图片
+    let mut rng = rand::thread_rng();
+    let num = rng.gen_range(0..datas.len());
+    let data_map = datas[num]["image"].as_object().unwrap();
+    // 获取分辨率最大的图片
+    let image = data_map.iter()
+        .max_by_key(|(key, _value)| key.to_string()[1..].parse::<i64>().unwrap())
+        .map(|(key, _value)| _value);
+    // 获取图片的URL
+    let mut image_url = v["configs"]["StickyPeek/default"]["properties"]
+        ["stickyPeekLightCoachmarkMainImageURL"].as_str().unwrap();
+    // 截取URL的路径
+    match image_url.rfind("/") {
+        Some(index) => image_url = &image_url[0..index + 1],
+        None => println!("Substring not found")
+    }
+    // 拼接图片的URL
+    let image_url = format!("{}{}", image_url, image.unwrap().as_str().unwrap());
+
+    println!("{:?}", data_map);
+    println!("{:?}", image_url);
+
+    Ok((image_url.to_string(), String::from("")))
+}
+
+// 下载壁纸图片
+async fn download_image() -> Result<String, Box<dyn std::error::Error>> {
+    // 获取图片的URL
+    let image_url;
+    let file_name;
+    let mut rng = rand::thread_rng();
+    let num = rng.gen_range(0..3);
+    if num == 1 {
+        (image_url, file_name) = get_spotlight_image_url().await?;
+    } else if num == 2 {
+        (image_url, file_name) = get_edge_chromium_image_url().await?;
+    } else {
+        (image_url, file_name) = get_bing_image_url().await?;
+    }
     // 下载图片
     let response = reqwest::get(&image_url).await?;
 
     // 获取当前目录
     let current_dir = env::current_dir().expect("获取当前目录失败");
     // 获取文件的扩展名
-    let ext = Path::new(rf.1.as_ref()).extension().and_then(|ext| ext.to_str()).unwrap_or("jpg");
+    let ext = Path::new(&file_name).extension().and_then(|ext| ext.to_str()).unwrap_or("jpg");
     // 构建文件的绝对路径
     let file_path = current_dir.join("bing_wallpaper.".to_owned() + ext);
+    // 创建文件
     let mut file = File::create(&file_path)?;
     let content = response.bytes().await?;
     file.write_all(&content)?;
@@ -226,12 +298,12 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         i_weekly_trigger.SetId(&BSTR::from("bing_wallpaper_weekly_trigger"))?;
         i_weekly_trigger.SetEnabled(VARIANT_BOOL::from(true))?;*/
 
-        // 创建每月的第一天触发器
+        // 创建每月的第几天触发器
         /*let trigger4 = triggers.Create(TASK_TRIGGER_MONTHLY)?;
         let i_monthly_trigger: IMonthlyTrigger = trigger4.cast::<IMonthlyTrigger>()?;
         i_monthly_trigger.SetDaysOfMonth(1i32)?;*/
 
-        // 创建每月的第一个星期几触发器
+        // 创建每月的第几个星期几触发器
         /*let trigger5 = triggers.Create(TASK_TRIGGER_MONTHLYDOW)?;
         let i_monthly_dow_trigger: IMonthlyDOWTrigger = trigger5.cast::<IMonthlyDOWTrigger>()?;
         i_monthly_dow_trigger.SetDaysOfWeek(1i32)?;*/
@@ -327,7 +399,7 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let image_path = download_bing_wallpaper().await?;
+    let image_path = download_image().await?;
     set_wallpaper(&image_path)?;
     // add_to_startup("", "")?;
 
