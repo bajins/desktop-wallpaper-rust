@@ -2,6 +2,8 @@
 // https://doc.rust-lang.org/reference/runtime.html#the-windows_subsystem-attribute
 #![windows_subsystem = "windows"]
 
+mod main_test;
+
 use std::{env, fs, io, mem};
 use std::error::Error;
 use std::ffi::c_void;
@@ -12,6 +14,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::rc::Rc;
 use reqwest;
+use reqwest::{Client, header, RequestBuilder, StatusCode};
 use url::Url;
 // use winapi::um::winuser::{SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE, SPIF_SENDCHANGE};
 use windows::core::{BSTR, GUID, Interface, IntoParam, VARIANT};
@@ -27,11 +30,12 @@ use winreg::RegKey;
 use wallpaper;
 use clap::{arg, command};
 use rand::Rng;
+use scraper::{Html, Selector};
 
 
 // 下载必应每日一图
 async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
-    // Bing 壁纸API的URL
+    // 壁纸API的URL
     let api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US";
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
@@ -55,7 +59,7 @@ async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
 
 //
 async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error>> {
-    // Bing 壁纸API的URL
+    // 壁纸API的URL
     let api_url = "https://arc.msn.com/v3/Delivery/Placement?pid=209567&fmt=json&cdm=1&pl=zh-CN&lc=zh-CN&ctry=CN";
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
@@ -72,15 +76,44 @@ async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error>> {
 
 // 获取Edge Chromium壁纸
 async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error>> {
-    // Bing 壁纸API的URL
-    let api_url = "https://assets.msn.cn/resolver/api/resolve/v3/config/?expType=AppConfig&expInstance=default&apptype=edgeChromium&v=20240202.634";
+    //
+    let api_url = "https://ntp.msn.com/edge/ntp?locale=zh-cn";
+    // 发起网络请求
+    let client = Client::new();
+    // 创建一个请求构建器
+    let mut builder: RequestBuilder = client.get(api_url);
+    // 设置请求头
+    builder = builder.header(header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0");
+    // 发送请求并获取响应
+    let response = builder.send().await?;
+    // 检查响应状态码
+    if response.status() != StatusCode::OK {
+        return Err(Box::new(io::Error::new(io::ErrorKind::Other, "请求获取版本失败")));
+    }
+    let body = response.text().await?;
+    println!("{:?}", body);
+    // 解析HTML
+    let document = Html::parse_document(&*body);
+    let head_selector = Selector::parse("head").unwrap();
+    let head = document.select(&head_selector).next().unwrap();
+    let dcs = head.value().attr("data-client-settings").unwrap();
+    if dcs.is_empty() {
+        return Err(Box::new(io::Error::new(io::ErrorKind::Other, "解析HTML并获取版本信息失败")));
+    }
+    // 解析JSON
+    let body_json: Value = serde_json::from_str(&dcs)?;
+    let version = body_json["bundleInfo"]["v"].as_str().unwrap();
+
+    // 壁纸API的URL
+    let api_url = "https://assets.msn.cn/resolver/api/resolve/v3/config/\
+    ?expType=AppConfig&expInstance=default&apptype=edgeChromium&v=".to_owned() + version;
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
     let body = res.text().await?;
-    println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
     let datas = v["configs"]["BackgroundImageWC/default"]["properties"]["cmsImage"]["data"]
         .as_array().unwrap();
+    println!("{:?}", datas);
     // 随机获取一张图片
     let mut rng = rand::thread_rng();
     let num = rng.gen_range(0..datas.len());
