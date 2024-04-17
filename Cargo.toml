@@ -2,6 +2,12 @@
 name = "desktop-wallpaper-rust"
 version = "0.1.0"
 edition = "2021"
+#build = "build.rs"
+#build = "build_winit.rs"
+#[[bin]]
+#name = "desktop-wallpaper-rust"
+#path = "src/main.rs"
+#windows_subsystem = "windows" # 为了让程序直接运行而不打开控制台窗口
 
 # See https://doc.rust-lang.org/cargo/reference/manifest.html#the-profile-sections
 [profile.release]
@@ -15,13 +21,11 @@ panic = "abort"
 
 [dependencies]
 # https://github.com/seanmonstar/reqwest
-reqwest = { version = "0.12.3", features = ["json"] }
+reqwest = { version = "0.12.3", features = ["json", "__rustls"] }
 # https://github.com/serde-rs/serde
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "1.0.198", features = ["derive"] }
 # https://github.com/serde-rs/json
-serde_json = "1.0.115"
-# https://github.com/gentoo90/winreg-rs
-winreg = "0.52.0"
+serde_json = "1.0.116"
 # https://github.com/tokio-rs/tokio
 tokio = { version = "1.37.0", features = ["rt", "rt-multi-thread", "macros"] }
 # https://github.com/reujab/wallpaper.rs
@@ -29,16 +33,33 @@ wallpaper = "3.2.0"
 # https://github.com/servo/rust-url
 url = "2.5.0"
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
-rand = { version = "0.9.0-alpha.0", features = [] }
+rand = { version = "0.9.0-alpha.1", features = [] }
 #select = "0.6.0"
 scraper = "0.19.0"
+#rustls = "0.23.4"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# https://github.com/gentoo90/winreg-rs
+winreg = "0.52.0"
 # https://crates.io/categories/os::windows-apis
 #[target.'cfg(windows)'.dependencies]
 # https://github.com/retep998/winapi-rs
 #winapi = { version = "0.3.9", features = ["winuser", "winreg"] }
 # https://github.com/microsoft/windows-rs
 [dependencies.windows]
-version = "0.54.0"
+version = "0.56.0"
 features = ["Data_Xml_Dom", "Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "System_UserProfile", "Win32_System_SystemServices", "Win32_System_Com", "Win32_System_TaskScheduler", "Win32_System_Ole", "Win32_System_Variant"]
 
+[build-dependencies]
+#winit = "0.29.15"
+#embed-resource = "2.4.2"
+#winres = "0.1.12"
+
+#[package.metadata.winres]
+#OriginalFilename = "desktop-wallpaper-rust.exe"
+#ProductName = "Astronomy Picture of the Day"
+#ProductVersion = "0.1.0"
+
+[dev-dependencies]
+tokio-test = "*"
+#actix-rt = "*"
