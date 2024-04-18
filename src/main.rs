@@ -1,6 +1,6 @@
 // #!必须放在头部
 // https://doc.rust-lang.org/reference/runtime.html#the-windows_subsystem-attribute
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 use std::{env, fs, io, mem};
 use std::error::Error;

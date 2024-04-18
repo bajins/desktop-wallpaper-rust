@@ -2,8 +2,7 @@
 name = "desktop-wallpaper-rust"
 version = "0.1.0"
 edition = "2021"
-#build = "build.rs"
-#build = "build_winit.rs"
+build = "build.rs"
 #[[bin]]
 #name = "desktop-wallpaper-rust"
 #path = "src/main.rs"
@@ -51,9 +50,12 @@ version = "0.56.0"
 features = ["Data_Xml_Dom", "Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "System_UserProfile", "Win32_System_SystemServices", "Win32_System_Com", "Win32_System_TaskScheduler", "Win32_System_Ole", "Win32_System_Variant"]
 
 [build-dependencies]
-#winit = "0.29.15"
-#embed-resource = "2.4.2"
-#winres = "0.1.12"
+winit = "0.29.15"
+embed-resource = "2.4.2"
+winres = "0.1.12"
+image = "0.25.1"
+ico = "0.3.0"
+icopng = "1.0.1"
 
 #[package.metadata.winres]
 #OriginalFilename = "desktop-wallpaper-rust.exe"
