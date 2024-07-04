@@ -10,26 +10,38 @@ use std::fs::File;
 use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
+use std::ptr::null_mut;
 use std::rc::Rc;
 use reqwest;
 use reqwest::{Client, header, RequestBuilder, StatusCode};
 use url::Url;
 // use winapi::um::winuser::{SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE, SPIF_SENDCHANGE};
-use windows::core::{BSTR, GUID, Interface, VARIANT};
+use windows::core::{BSTR, GUID, HSTRING, Interface, Type, VARIANT};
+use windows::System::UserProfile::{IUserProfilePersonalizationSettingsStatics, LockScreen, UserProfilePersonalizationSettings};
+use windows::Storage::{IStorageFile, StorageFile};
 use windows::Win32::UI::WindowsAndMessaging::{SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoA, SystemParametersInfoW};
-use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE};
-use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal, IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY, TASK_LOGON_INTERACTIVE_TOKEN, TASK_TRIGGER_TYPE2, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_CREATE_OR_UPDATE, ISessionStateChangeTrigger, TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_CUSTOM_TRIGGER_01, ITaskTrigger, TASK_RUNLEVEL_HIGHEST, TASK_INSTANCES_IGNORE_NEW, ITaskSettings2};
-use windows::Win32::System::Com::{
-    CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED,
-};
+use windows::Win32::UI::Shell::{SHGetDesktopFolder, IDesktopWallpaper, DESKTOP_WALLPAPER_POSITION, DWPOS_FILL};
+use windows::Win32::Foundation::{BOOL, BOOLEAN, E_INVALIDARG, S_OK, ERROR_ACCESS_DENIED, ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, FILETIME, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE};
+use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal, IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY, TASK_LOGON_INTERACTIVE_TOKEN, TASK_TRIGGER_TYPE2, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_CREATE_OR_UPDATE, ISessionStateChangeTrigger, TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_CUSTOM_TRIGGER_01, ITaskTrigger, TASK_RUNLEVEL_HIGHEST, TASK_INSTANCES_IGNORE_NEW, ITaskSettings2, ITaskScheduler};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::Variant::{VariantClear, VariantInit};
+use windows::Win32::System::SystemInformation::*;
+use windows::Win32::System::EventNotificationService::IsNetworkAlive;
+use windows::Win32::System::WinRT::*;
+use windows::core::PCWSTR;
+use windows::Win32::NetworkManagement::*;
+use windows::Win32::NetworkManagement::WNet::*;
+use windows::Win32::NetworkManagement::IpHelper::{GetNetworkParams, FIXED_INFO_W2KSP1, IP_ADAPTER_INFO, GetAdaptersInfo};
+use windows::Win32::Networking::*;
+use windows::Win32::Networking::WinInet::{InternetGetConnectedState, INTERNET_CONNECTION_LAN, INTERNET_CONNECTION_MODEM, INTERNET_CONNECTION_PROXY, INTERNET_RAS_INSTALLED, INTERNET_CONNECTION, InternetCheckConnectionW, FLAG_ICC_FORCE_CONNECTION};
+use windows::Win32::Networking::WinSock::{AF_UNSPEC, IPPROTO_IP, SOCK_STREAM, SOCKET_ERROR, WSASocketW};
+use windows::Win32::Networking::NetworkListManager::{INetworkListManager, NetworkListManager, NLM_CONNECTIVITY, NLM_CONNECTIVITY_DISCONNECTED};
 use winreg::enums::*;
 use winreg::RegKey;
 use wallpaper;
 use clap::{arg, command};
 use rand::Rng;
 use scraper::{Html, Selector};
-
 
 // 下载必应每日一图
 async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
@@ -340,12 +352,12 @@ async fn download_image() -> Result<String, Box<dyn std::error::Error>> {
         (image_url, file_name) = get_spotlight_image_url().await?;
     } else if num == 2 {
         (image_url, file_name) = get_edge_chromium_image_url().await?;
-    /*} else if num == 3 {
-        (image_url, file_name) = get_pixabay_image_url().await?;*/
+        /*} else if num == 3 {
+            (image_url, file_name) = get_pixabay_image_url().await?;*/
     } else if num == 4 {
         (image_url, file_name) = get_iciba_image_url().await?;
-    /*} else if num == 5 {
-        (image_url, file_name) = get_alphacoders_image_url().await?;*/
+        /*} else if num == 5 {
+            (image_url, file_name) = get_alphacoders_image_url().await?;*/
     } else if num == 6 {
         (image_url, file_name) = get_nasa_image_url().await?;
     } else {
@@ -440,7 +452,92 @@ fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             Ok(true)
         }
+
+        // 方式2 https://learn.microsoft.com/zh-cn/windows/win32/api/shobjidl_core/nn-shobjidl_core-idesktopwallpaper
+        /*let result = CoCreateInstance(
+            &IDesktopWallpaper::IID,
+            None,
+            CLSCTX_ALL,
+        );
+        if result.is_err() {
+            return Err(From::from(result));
+        }
+        // 获取桌面壁纸管理器的 COM 接口
+        let desktop_wallpaper: IDesktopWallpaper = result.unwrap();
+
+        // 获取桌面文件夹路径
+        let result = SHGetDesktopFolder()?;
+
+        // 设置锁屏壁纸
+        // 构建完整路径
+        let result = desktop_wallpaper.SetWallpaper(desktop_wallpaper.GetMonitorDevicePathAt(0).unwrap(), PCWSTR::from_raw(image_path.as_ptr() as _));
+        if result.is_err() {
+            return Err(From::from(result));
+        }
+        // 设置壁纸位置
+        desktop_wallpaper.SetPosition(DWPOS_FILL)?;*/
+
+        // 方式3 IActiveDesktop
+
+        // 方法4 https://learn.microsoft.com/zh-cn/uwp/api/windows.system.userprofile.userprofilepersonalizationsettings.trysetwallpaperimageasync
     }.expect("设置壁纸失败");
+
+    Ok(())
+}
+
+// 设置锁屏壁纸的函数
+fn set_lock_screen_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    unsafe {
+        // 初始化COM
+        let com_res = CoInitializeEx(None, COINIT_MULTITHREADED);
+        if com_res.is_err() {
+            // 初始化COM库失败
+            Err(Box::<dyn Error>::from(com_res.message()))?;
+        }
+        // 初始化Windows运行时
+        RoInitialize(RO_INIT_MULTITHREADED)?;
+
+        // https://learn.microsoft.com/zh-cn/uwp/api/windows.system.userprofile.userprofilepersonalizationsettings.trysetlockscreenimageasync
+        /*let personalization_settings: IUserProfilePersonalizationSettingsStatics = RoGetActivationFactory(
+            &HSTRING::from("Windows.System.UserProfile.UserProfilePersonalizationSettings"),
+        )?;
+        // Convert wallpaper path to HSTRING
+        let hstring_wallpaper_path = HSTRING::from(image_path);
+        // Set the lock screen image
+        personalization_settings.TrySetLockScreenImageAsync(&hstring_wallpaper_path)?;*/
+
+        /*if !UserProfilePersonalizationSettings::IsSupported() {
+            return Err("Lock screen image setting is not supported on this device.".into());
+        }
+        let personalization_settings = UserProfilePersonalizationSettings::Current()?;
+        StorageFile::GetFileFromPathAsync(&HSTRING::from(image_path))?.then(|file| {
+           let result = personalization_settings.TrySetLockScreenImageAsync(&file)?;
+            if !result.get().unwrap() {
+                return Err("Failed to set lock screen image.".into());
+            }
+        })?;*/
+
+        // https://learn.microsoft.com/zh-cn/uwp/api/windows.system.userprofile.lockscreen
+        // SetImageFileAsync、SetImageStreamAsync
+        let file: StorageFile = StorageFile::GetFileFromPathAsync(&HSTRING::from(image_path))?.get()?;
+        // 将 StorageFile 转换为 IStorageFile
+        let file: IStorageFile = file.cast()?;
+        let result = LockScreen::SetImageFileAsync(&file)?;
+        match result.get() {
+            Ok(result) => {
+                println!("{:?}", result);
+            }
+            Err(error) => {
+                println!("{:?}", error);
+            }
+        }
+        // Windows聚焦(Windows Spotlight)
+
+        // 关闭Windows运行时
+        RoUninitialize();
+        // 释放COM资源
+        CoUninitialize();
+    }
 
     Ok(())
 }
@@ -555,6 +652,9 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         let trigger8 = triggers.Create(TASK_TRIGGER_BOOT)?;
         let i_boot_trigger: IBootTrigger = trigger8.cast::<IBootTrigger>()?;
         i_boot_trigger.SetId(&BSTR::from("bing_wallpaper_boot_trigger"))?;
+        // 设置延迟时间
+        // ISO 8601 duration format (e.g., "PT30M" for 30 minutes) P[nY][nM][nD][T[nH][nM][nS]]
+        i_boot_trigger.SetDelay(&BSTR::from("PT2M"))?;
         i_boot_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
         // trigger8.SetStartBoundary(&BSTR::from("2007-01-01T08:00:00"))?;
 
@@ -562,6 +662,9 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         let trigger9 = triggers.Create(TASK_TRIGGER_LOGON)?;
         let i_logon_trigger: ILogonTrigger = trigger9.cast::<ILogonTrigger>()?;
         i_logon_trigger.SetId(&BSTR::from("bing_wallpaper_logon_trigger"))?;
+        // 设置延迟时间
+        // ISO 8601 duration format (e.g., "PT30M" for 30 minutes) P[nY][nM][nD][T[nH][nM][nS]]
+        i_logon_trigger.SetDelay(&BSTR::from("PT2M"))?;
         i_logon_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
 
         // 用于触发控制台连接或断开连接，远程连接或断开连接或工作站锁定或解锁通知的任务。
@@ -569,6 +672,9 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         let i_ssc_trigger: ISessionStateChangeTrigger = trigger11.unwrap()
             .cast::<ISessionStateChangeTrigger>()?;
         i_ssc_trigger.SetId(&BSTR::from("bing_wallpaper_ssc_trigger"))?;
+        // 设置延迟时间
+        // ISO 8601 duration format (e.g., "PT30M" for 30 minutes) P[nY][nM][nD][T[nH][nM][nS]]
+        i_logon_trigger.SetDelay(&BSTR::from("PT30S"))?;
         i_ssc_trigger.SetEnabled(VARIANT_BOOL::from(true))?;
         // 获取或设置将触发任务启动的终端服务器会话更改的类型：7锁定；8解锁
         i_ssc_trigger.SetStateChange(TASK_SESSION_UNLOCK)?;
@@ -626,6 +732,125 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+// 检查网络连接状态
+fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
+    // 方式1：使用 Windows API 函数 InternetCheckConnectionW
+    let url = "https://www.google.com";
+    // Windows API 函数通常使用宽字符串（UTF-16）。将 URL 转换为宽字符串并添加一个 null 终止符
+    let url_wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+    let is_alive = unsafe {
+        let result = InternetCheckConnectionW(
+            PCWSTR(url_wide.as_ptr()),
+            FLAG_ICC_FORCE_CONNECTION,
+            0,
+        );
+        match result {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    };
+
+    // 方式2：使用 Windows API 函数 InternetGetConnectedState
+    let is_alive = unsafe {
+        let mut flags = INTERNET_CONNECTION::default();
+        // 调用 InternetGetConnectedState 函数获取网络连接状态
+        InternetGetConnectedState(&mut flags, 0).is_err() ||
+            // INTERNET_CONNECTION_MODEM：调制解调器连接。
+            // INTERNET_CONNECTION_LAN：局域网连接。
+            // INTERNET_CONNECTION_PROXY：代理连接。
+            // INTERNET_RAS_INSTALLED：如果设置了此标志，则表示安装了远程访问服务 (RAS)，并且可能存在活动连接。
+            (flags & (INTERNET_CONNECTION_MODEM | INTERNET_CONNECTION_LAN | INTERNET_CONNECTION_PROXY)) != INTERNET_CONNECTION::default()
+            || (flags & INTERNET_RAS_INSTALLED) != INTERNET_CONNECTION::default()
+    };
+
+    // 方式3：使用 Windows API 函数 IsNetworkAlive
+    let is_alive = unsafe {
+        let result = IsNetworkAlive(&mut 0);
+        match result {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    };
+
+
+    // 方式4：使用 Windows API 函数 GetConnectivity
+    let is_alive = unsafe {
+        let network_list_manager: INetworkListManager = unsafe {
+            CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL)?
+        };
+        let connectivity = network_list_manager.GetConnectivity()?;
+        connectivity != NLM_CONNECTIVITY_DISCONNECTED
+    };
+
+    // 方式5：使用 Windows API 函数 GetNetworkParams
+    let is_alive = unsafe {
+        /*let mut fixed_info: *mut FIXED_INFO_W2KSP1 = null_mut();
+        let mut size = 0;
+
+        // 第一次调用 GetNetworkParams 函数来获取所需的缓冲区大小。
+        let result = GetNetworkParams(*null_mut(), &mut size);
+        if result != ERROR_BUFFER_OVERFLOW {
+            return Err(windows::core::Error::from_win32().into());
+        }
+        // 分配足够的内存来存储网络参数。
+        fixed_info = std::alloc::alloc(std::alloc::Layout::from_size_align_unchecked(size as usize, 1)) as *mut FIXED_INFO_W2KSP1;
+
+        // 第二次调用 GetNetworkParams 函数来获取实际的网络参数。
+        let result = GetNetworkParams(Option::from(fixed_info), &mut size);
+        if result != ERROR_SUCCESS {
+            return Err(windows::core::Error::from_win32().into());
+        }
+        // 检查 CurrentIpAddress 字段是否有效来判断网络是否连接。
+        let is_connected = (*(*fixed_info).CurrentDnsServer).IpAddress.String[0] != 0;
+        // 释放分配的内存。
+        std::alloc::dealloc(fixed_info as *mut u8, std::alloc::Layout::from_size_align_unchecked(size as usize, 1));*/
+
+        let mut adapter_info: Option<*mut IP_ADAPTER_INFO> = None;
+        let mut out_buf_len: u32 = 0;
+
+        // 第一次调用 GetAdaptersInfo 函数来获取所需的缓冲区大小
+        GetAdaptersInfo(adapter_info, &mut out_buf_len);
+        // Allocate memory for the buffer
+        adapter_info = Some(
+            std::mem::transmute(
+                std::alloc::alloc(
+                    std::alloc::Layout::from_size_align_unchecked(
+                        out_buf_len as usize,
+                        std::mem::align_of::<IP_ADAPTER_INFO>(),
+                    )
+                )
+            )
+        );
+        // Second call to GetAdaptersInfo to get the actual data
+        GetAdaptersInfo(adapter_info, &mut out_buf_len);
+        // Access the adapter info
+        let mut adapter_info = adapter_info.unwrap();
+        // Iterate over the linked list of IP_ADAPTER_INFO structures
+        /*while !adapter_info.is_null() {
+            let adapter = &*adapter_info;
+            let adapter_name = std::ffi::CStr::from_ptr(adapter.AdapterName.as_ptr() as *const i8);
+            let description = std::ffi::CStr::from_ptr(adapter.Description.as_ptr() as *const i8);
+
+            println!("Adapter Name: {:?}", adapter_name);
+            println!("Description: {:?}", description);
+
+            adapter_info = adapter.Next;
+        }*/
+        // Free the allocated memory
+        std::alloc::dealloc(
+            std::mem::transmute(adapter_info),
+            std::alloc::Layout::from_size_align_unchecked(
+                out_buf_len as usize,
+                std::mem::align_of::<IP_ADAPTER_INFO>(),
+            ),
+        );
+
+        (*(*adapter_info).CurrentIpAddress).IpAddress.String[0] != 0
+    };
+
+    Ok(is_alive)
 }
 
 #[tokio::main]
