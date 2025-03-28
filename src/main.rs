@@ -21,9 +21,9 @@ use windows::System::UserProfile::{IUserProfilePersonalizationSettingsStatics, L
 use windows::Storage::{IStorageFile, StorageFile};
 use windows::Win32::UI::WindowsAndMessaging::{SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoA, SystemParametersInfoW};
 use windows::Win32::UI::Shell::{SHGetDesktopFolder, IDesktopWallpaper, DESKTOP_WALLPAPER_POSITION, DWPOS_FILL};
-use windows::Win32::Foundation::{BOOL, BOOLEAN, E_INVALIDARG, S_OK, ERROR_ACCESS_DENIED, ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, FILETIME, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE};
+use windows::Win32::Foundation::{BOOL, BOOLEAN, E_INVALIDARG, S_OK, ERROR_ACCESS_DENIED, ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, FILETIME, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE, GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal, IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY, TASK_LOGON_INTERACTIVE_TOKEN, TASK_TRIGGER_TYPE2, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_CREATE_OR_UPDATE, ISessionStateChangeTrigger, TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_CUSTOM_TRIGGER_01, ITaskTrigger, TASK_RUNLEVEL_HIGHEST, TASK_INSTANCES_IGNORE_NEW, ITaskSettings2, ITaskScheduler};
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED, COINIT_APARTMENTTHREADED, CLSCTX_INPROC_SERVER, IStream};
 use windows::Win32::System::Variant::{VariantClear, VariantInit};
 use windows::Win32::System::SystemInformation::*;
 use windows::Win32::System::EventNotificationService::IsNetworkAlive;
@@ -36,12 +36,18 @@ use windows::Win32::Networking::*;
 use windows::Win32::Networking::WinInet::{InternetGetConnectedState, INTERNET_CONNECTION_LAN, INTERNET_CONNECTION_MODEM, INTERNET_CONNECTION_PROXY, INTERNET_RAS_INSTALLED, INTERNET_CONNECTION, InternetCheckConnectionW, FLAG_ICC_FORCE_CONNECTION};
 use windows::Win32::Networking::WinSock::{AF_UNSPEC, IPPROTO_IP, SOCK_STREAM, SOCKET_ERROR, WSASocketW};
 use windows::Win32::Networking::NetworkListManager::{INetworkListManager, NetworkListManager, NLM_CONNECTIVITY, NLM_CONNECTIVITY_DISCONNECTED};
+use windows::Win32::Storage::Packaging::Opc::*;
+use windows::core::imp::PROPVARIANT;
+use windows::Win32::Graphics::Imaging::{CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR, IWICBitmapDecoder, IWICBitmapEncoder, IWICBitmapFrameDecode, IWICBitmapFrameEncode, IWICImagingFactory, WICBitmapCreateCacheOption, WICBitmapDitherTypeNone, WICBitmapNoCache, WICDecodeMetadataCacheOnDemand};
+use windows::Win32::Storage::FileSystem::{CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_READ};
+use windows::Win32::System::Com::StructuredStorage::IPropertyBag2;
 use winreg::enums::*;
 use winreg::RegKey;
 use wallpaper;
 use clap::{arg, command};
 use rand::Rng;
 use scraper::{Html, Selector};
+use windows::Win32::Security::SECURITY_ATTRIBUTES;
 
 // 下载必应每日一图
 async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
@@ -403,10 +409,88 @@ fn get_wallpaper() -> Result<String, Box<dyn std::error::Error>> {
     }
 }
 
+// Windows Imaging Component (WIC) 将图像转码为 Windows 11 中 TranscodedWallpaper 文件（JPEG 格式）
+// https://learn.microsoft.com/zh-cn/windows/win32/wic/-wic-about-windows-imaging-codec
+fn wic_codec() -> windows::core::Result<()> {
+    /*unsafe {
+        // 初始化 COM
+        CoInitializeEx(None, COINIT_MULTITHREADED)?;
+
+        // 创建 WIC 工厂
+        let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+
+        // 创建输入图像解码器
+        let input_file_path = "input_image.png";
+        let decoder: IWICBitmapDecoder = factory.CreateDecoderFromFilename(&input_file_path, None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
+
+        // 获取第一帧
+        let frame_index = 0;
+        let frame_decode: IWICBitmapFrameDecode = decoder.GetFrame(frame_index)?;
+
+        // 获取输入帧像素格式
+        let input_pixel_format = frame_decode.GetPixelFormat()?;
+
+        // 定义目标像素格式（JPEG 通常使用 24 位 BGR）
+        let desired_pixel_format = GUID_WICPixelFormat24bppBGR;
+
+        // 如果需要，转换像素格式
+        let source_to_write: Box<dyn windows::Win32::Graphics::Imaging::IWICBitmapSource> = if input_pixel_format == desired_pixel_format {
+            frame_decode
+        } else {
+            let converter = factory.CreateFormatConverter()?;
+            converter.Initialize(frame_decode, desired_pixel_format, WICBitmapDitherTypeNone, None, 0.0f32 as f64, WICBitmapPalettesMedianCut)?;
+            converter
+        };
+
+        // 创建 OPC Factory
+        let opc_factory: IOpcFactory = CoCreateInstance(
+            &OpcFactory,
+            None,
+            CLSCTX_ALL,
+        )?;
+        // 创建输出 JPEG 文件的编码器
+        let output_file_path = "output_image.jpg";
+        // 调用 CreateStreamOnFile
+        let mut stream = None;
+        let stream: IStream = opc_factory.CreateStreamOnFile(
+            &output_file_path,
+            OPC_STREAM_IO_WRITE, // 写入模式
+            SECURITY_ATTRIBUTES::default(),                // 安全属性默认
+            FILE_ATTRIBUTE_NORMAL,
+        );
+        let encoder: IWICBitmapEncoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, GUID::default() as *const GUID)?;
+        encoder.Initialize(stream, WICBitmapNoCache)?;
+
+        // 创建新帧
+        let frame_encode: IWICBitmapFrameEncode = encoder.CreateNewFrame((), ())?;
+
+        // 设置属性包，设置图像质量为 85（0.85）
+        // https://learn.microsoft.com/zh-cn/windows/win32/wic/-wic-creating-encoder
+        let property_bag: IPropertyBag2 = frame_encode.GetPropertyBag2().unwrap();
+        let mut var_quality = PROPVARIANT { vt: VT_R4, fltVal: 0.85f32, ..Default::default() };
+        property_bag.Write(L"ImageQuality", &var_quality)?;
+
+        // 设置帧大小
+        let (width, height) = source_to_write.GetSize().unwrap();
+        frame_encode.SetSize(width, height)?;
+
+        // 写入源图像到帧
+        frame_encode.WriteSource(source_to_write, None)?;
+
+        // 提交帧和编码器
+        frame_encode.Commit()?;
+        encoder.Commit()?;
+
+        // 清理
+        CoUninitialize();
+    }*/
+    Ok(())
+}
+
 // 设置壁纸的函数
 fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     // 通过系统调用设置壁纸
-    println!("{:?}", get_wallpaper().unwrap());
+    println!("{:?}", get_wallpaper()?);
     /*println!("{:?}", wallpaper::get());
     // 从文件路径设置当前桌面的壁纸。
     wallpaper::set_from_path(&image_path).unwrap();
@@ -859,10 +943,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     set_wallpaper(&image_path)?;
     // add_to_startup("", "")?;
 
-    match fs::remove_file(image_path) {
+    /*match fs::remove_file(image_path) {
         Err(e) => println!("壁纸文件删除错误: {}", e),
         Ok(_) => {}
-    }
+    }*/
 
     let matches = command!()
         .arg(
