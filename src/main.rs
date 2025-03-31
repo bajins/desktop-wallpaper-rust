@@ -2,52 +2,93 @@
 // https://doc.rust-lang.org/reference/runtime.html#the-windows_subsystem-attribute
 // #![windows_subsystem = "windows"]
 
-use std::{env, fs, io, mem};
+use reqwest;
+use reqwest::{header, Client, RequestBuilder, StatusCode};
+use serde_json::Value;
 use std::error::Error;
 use std::ffi::c_void;
-use serde_json::Value;
 use std::fs::File;
 use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::null_mut;
 use std::rc::Rc;
-use reqwest;
-use reqwest::{Client, header, RequestBuilder, StatusCode};
+use std::{env, fs, io, mem};
 use url::Url;
 // use winapi::um::winuser::{SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_UPDATEINIFILE, SPIF_SENDCHANGE};
-use windows::core::{BSTR, GUID, HSTRING, Interface, Type, VARIANT};
-use windows::System::UserProfile::{IUserProfilePersonalizationSettingsStatics, LockScreen, UserProfilePersonalizationSettings};
-use windows::Storage::{IStorageFile, StorageFile};
-use windows::Win32::UI::WindowsAndMessaging::{SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoA, SystemParametersInfoW};
-use windows::Win32::UI::Shell::{SHGetDesktopFolder, IDesktopWallpaper, DESKTOP_WALLPAPER_POSITION, DWPOS_FILL};
-use windows::Win32::Foundation::{BOOL, BOOLEAN, E_INVALIDARG, S_OK, ERROR_ACCESS_DENIED, ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, FILETIME, GetLastError, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE, GENERIC_READ, GENERIC_WRITE};
-use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal, IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_LOGON_TYPE, TASK_RUNLEVEL_TYPE, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY, TASK_LOGON_INTERACTIVE_TOKEN, TASK_TRIGGER_TYPE2, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_CREATE_OR_UPDATE, ISessionStateChangeTrigger, TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_CUSTOM_TRIGGER_01, ITaskTrigger, TASK_RUNLEVEL_HIGHEST, TASK_INSTANCES_IGNORE_NEW, ITaskSettings2, ITaskScheduler};
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED, COINIT_APARTMENTTHREADED, CLSCTX_INPROC_SERVER, IStream};
-use windows::Win32::System::Variant::{VariantClear, VariantInit};
-use windows::Win32::System::SystemInformation::*;
-use windows::Win32::System::EventNotificationService::IsNetworkAlive;
-use windows::Win32::System::WinRT::*;
-use windows::core::PCWSTR;
-use windows::Win32::NetworkManagement::*;
-use windows::Win32::NetworkManagement::WNet::*;
-use windows::Win32::NetworkManagement::IpHelper::{GetNetworkParams, FIXED_INFO_W2KSP1, IP_ADAPTER_INFO, GetAdaptersInfo};
-use windows::Win32::Networking::*;
-use windows::Win32::Networking::WinInet::{InternetGetConnectedState, INTERNET_CONNECTION_LAN, INTERNET_CONNECTION_MODEM, INTERNET_CONNECTION_PROXY, INTERNET_RAS_INSTALLED, INTERNET_CONNECTION, InternetCheckConnectionW, FLAG_ICC_FORCE_CONNECTION};
-use windows::Win32::Networking::WinSock::{AF_UNSPEC, IPPROTO_IP, SOCK_STREAM, SOCKET_ERROR, WSASocketW};
-use windows::Win32::Networking::NetworkListManager::{INetworkListManager, NetworkListManager, NLM_CONNECTIVITY, NLM_CONNECTIVITY_DISCONNECTED};
-use windows::Win32::Storage::Packaging::Opc::*;
-use windows::core::imp::PROPVARIANT;
-use windows::Win32::Graphics::Imaging::{CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR, IWICBitmapDecoder, IWICBitmapEncoder, IWICBitmapFrameDecode, IWICBitmapFrameEncode, IWICImagingFactory, WICBitmapCreateCacheOption, WICBitmapDitherTypeNone, WICBitmapNoCache, WICDecodeMetadataCacheOnDemand};
-use windows::Win32::Storage::FileSystem::{CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_READ};
-use windows::Win32::System::Com::StructuredStorage::IPropertyBag2;
-use winreg::enums::*;
-use winreg::RegKey;
-use wallpaper;
 use clap::{arg, command};
 use rand::Rng;
 use scraper::{Html, Selector};
+use wallpaper;
+use windows::core::PCWSTR;
+use windows::core::{Interface, Type, BSTR, GUID, HSTRING};
+use windows::Storage::{IStorageFile, StorageFile};
+use windows::System::UserProfile::{
+    IUserProfilePersonalizationSettingsStatics, LockScreen, UserProfilePersonalizationSettings,
+};
+use windows::Win32::Foundation::{
+    GetLastError, ERROR_ACCESS_DENIED, ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, E_INVALIDARG,
+    FILETIME, GENERIC_READ, GENERIC_WRITE, S_OK, TRUE, VARIANT_BOOL, VARIANT_FALSE, VARIANT_TRUE,
+};
+use windows::Win32::Graphics::Imaging::{
+    CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR,
+    IWICBitmapDecoder, IWICBitmapEncoder, IWICBitmapFrameDecode, IWICBitmapFrameEncode,
+    IWICImagingFactory, WICBitmapCreateCacheOption, WICBitmapDitherTypeNone, WICBitmapNoCache,
+    WICDecodeMetadataCacheOnDemand,
+};
+use windows::Win32::NetworkManagement::IpHelper::{
+    GetAdaptersInfo, GetNetworkParams, FIXED_INFO_W2KSP1, IP_ADAPTER_INFO,
+};
+use windows::Win32::NetworkManagement::WNet::*;
+use windows::Win32::NetworkManagement::*;
+use windows::Win32::Networking::NetworkListManager::{
+    INetworkListManager, NetworkListManager, NLM_CONNECTIVITY, NLM_CONNECTIVITY_DISCONNECTED,
+};
+use windows::Win32::Networking::WinInet::{
+    InternetCheckConnectionW, InternetGetConnectedState, FLAG_ICC_FORCE_CONNECTION,
+    INTERNET_CONNECTION, INTERNET_CONNECTION_LAN, INTERNET_CONNECTION_MODEM,
+    INTERNET_CONNECTION_PROXY, INTERNET_RAS_INSTALLED,
+};
+use windows::Win32::Networking::WinSock::{
+    WSASocketW, AF_UNSPEC, IPPROTO_IP, SOCKET_ERROR, SOCK_STREAM,
+};
+use windows::Win32::Networking::*;
 use windows::Win32::Security::SECURITY_ATTRIBUTES;
+use windows::Win32::Storage::FileSystem::{
+    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_READ,
+};
+use windows::Win32::Storage::Packaging::Opc::*;
+use windows::Win32::System::Com::StructuredStorage::IPropertyBag2;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, IStream, CLSCTX_ALL, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED,
+};
+use windows::Win32::System::EventNotificationService::IsNetworkAlive;
+use windows::Win32::System::SystemInformation::*;
+use windows::Win32::System::TaskScheduler::{
+    IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction,
+    IIdleTrigger, ILogonTrigger, IMonthlyDOWTrigger, IMonthlyTrigger, INetworkSettings, IPrincipal,
+    IRegistrationInfo, IRegistrationTrigger, IRepetitionPattern, ISessionStateChangeTrigger,
+    ITaskDefinition, ITaskFolder, ITaskScheduler, ITaskService, ITaskSettings, ITaskSettings2,
+    ITaskTrigger, ITimeTrigger, ITrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler,
+    TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW,
+    TASK_LOGON_INTERACTIVE_TOKEN, TASK_LOGON_TYPE, TASK_RUNLEVEL_HIGHEST, TASK_RUNLEVEL_TYPE,
+    TASK_SESSION_STATE_CHANGE_TYPE, TASK_SESSION_UNLOCK, TASK_TRIGGER_BOOT,
+    TASK_TRIGGER_CUSTOM_TRIGGER_01, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE,
+    TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION,
+    TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_TRIGGER_TIME, TASK_TRIGGER_TYPE2, TASK_TRIGGER_WEEKLY,
+};
+use windows::Win32::System::Variant::{VariantClear, VariantInit, VARIANT};
+use windows::Win32::System::WinRT::*;
+use windows::Win32::UI::Shell::{
+    IDesktopWallpaper, SHGetDesktopFolder, DESKTOP_WALLPAPER_POSITION, DWPOS_FILL,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    SystemParametersInfoA, SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
+    SPI_GETDESKWALLPAPER, SPI_SETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+};
+use winreg::enums::*;
+use winreg::RegKey;
 
 // 下载必应每日一图
 async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
@@ -58,7 +99,10 @@ async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
     let body = res.text().await?;
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
-    let image_url = format!("https://www.bing.com{}", v["images"][0]["url"].as_str().unwrap());
+    let image_url = format!(
+        "https://www.bing.com{}",
+        v["images"][0]["url"].as_str().unwrap()
+    );
     // 解析URL
     let parsed = Url::parse(&image_url).unwrap();
     // 获取查询参数
@@ -83,7 +127,9 @@ async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error>> {
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
     let item: Value = serde_json::from_str(v["batchrsp"]["items"][0]["item"].as_str().unwrap())?;
-    let image_url = item["ad"]["image_fullscreen_001_landscape"]["u"].as_str().unwrap();
+    let image_url = item["ad"]["image_fullscreen_001_landscape"]["u"]
+        .as_str()
+        .unwrap();
 
     println!("{:?}", item["ad"]["hs1_title_text"]["tx"]);
 
@@ -104,7 +150,10 @@ async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error
     let response = builder.send().await?;
     // 检查响应状态码
     if response.status() != StatusCode::OK {
-        return Err(Box::new(io::Error::new(io::ErrorKind::Other, "请求获取版本失败")));
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            "请求获取版本失败",
+        )));
     }
     let body = response.text().await?;
     // println!("{:?}", body);
@@ -114,7 +163,10 @@ async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error
     let head = document.select(&head_selector).next().unwrap();
     let dcs = head.value().attr("data-client-settings").unwrap();
     if dcs.is_empty() {
-        return Err(Box::new(io::Error::new(io::ErrorKind::Other, "解析HTML并获取版本信息失败")));
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            "解析HTML并获取版本信息失败",
+        )));
     }
     // 解析JSON
     let body_json: Value = serde_json::from_str(&dcs)?;
@@ -123,29 +175,35 @@ async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error
 
     // 壁纸API的URL
     let api_url = "https://assets.msn.cn/resolver/api/resolve/v3/config/\
-    ?expType=AppConfig&expInstance=default&apptype=edgeChromium&v=".to_owned() + version;
+    ?expType=AppConfig&expInstance=default&apptype=edgeChromium&v="
+        .to_owned()
+        + version;
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
     let body = res.text().await?;
     let v: Value = serde_json::from_str(&body)?;
     let datas = v["configs"]["BackgroundImageWC/default"]["properties"]["cmsImage"]["data"]
-        .as_array().unwrap();
+        .as_array()
+        .unwrap();
     println!("{:?}", datas);
     // 随机获取一张图片
     let mut rng = rand::thread_rng();
     let num = rng.gen_range(0..datas.len());
     let data_map = datas[num]["image"].as_object().unwrap();
     // 获取分辨率最大的图片
-    let image = data_map.iter()
+    let image = data_map
+        .iter()
         .max_by_key(|(key, _value)| key.to_string()[1..].parse::<i64>().unwrap())
         .map(|(key, _value)| _value);
     // 获取图片的URL
     let mut image_url = v["configs"]["StickyPeek/default"]["properties"]
-        ["stickyPeekLightCoachmarkMainImageURL"].as_str().unwrap();
+        ["stickyPeekLightCoachmarkMainImageURL"]
+        .as_str()
+        .unwrap();
     // 截取URL的路径
     match image_url.rfind("/") {
         Some(index) => image_url = &image_url[0..index + 1],
-        None => println!("Substring not found")
+        None => println!("Substring not found"),
     }
     // 拼接图片的URL
     let image_url = format!("{}{}", image_url, image.unwrap().as_str().unwrap());
@@ -216,7 +274,9 @@ async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Error>>
     );
     headers.insert(
         header::HeaderName::from_static("sec-ch-ua"),
-        header::HeaderValue::from_static(r#""Microsoft Edge";v="123", "Not:A-Brand";v="8", "Chromium";v="123""#),
+        header::HeaderValue::from_static(
+            r#""Microsoft Edge";v="123", "Not:A-Brand";v="8", "Chromium";v="123""#,
+        ),
     );
     headers.insert(
         header::HeaderName::from_static("sec-ch-ua-mobile"),
@@ -282,14 +342,20 @@ async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Error>>
         img_ids.push(id.1.to_string());
     }
     if img_ids.is_empty() {
-        return Err(Box::new(io::Error::new(io::ErrorKind::Other, "解析HTML并获取版本信息失败")));
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            "解析HTML并获取版本信息失败",
+        )));
     }
     // 随机获取一张图片
     let mut rng = rand::thread_rng();
     let num = rng.gen_range(0..img_ids.len());
     let image_id = img_ids[num].as_str();
 
-    let image_url = format!("https://initiate.alphacoders.com/download/images6/{}/png", image_id);
+    let image_url = format!(
+        "https://initiate.alphacoders.com/download/images6/{}/png",
+        image_id
+    );
     println!("{:?}", image_url);
 
     Ok((image_url.to_string(), String::from("")))
@@ -338,7 +404,10 @@ async fn get_nasa_image_url() -> Result<(String, String), Box<dyn Error>> {
     let v: Value = serde_json::from_str(&body)?;
     let media_type = v["media_type"].as_str().unwrap();
     if media_type != "image" {
-        return Err(Box::new(io::Error::new(io::ErrorKind::Other, format!("媒体类型不是图片: {media_type}"))));
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::Other,
+            format!("媒体类型不是图片: {media_type}"),
+        )));
     }
     let image_url = v["hdurl"].as_str().unwrap();
 
@@ -359,11 +428,11 @@ async fn download_image() -> Result<String, Box<dyn std::error::Error>> {
     } else if num == 2 {
         (image_url, file_name) = get_edge_chromium_image_url().await?;
         /*} else if num == 3 {
-            (image_url, file_name) = get_pixabay_image_url().await?;*/
+        (image_url, file_name) = get_pixabay_image_url().await?;*/
     } else if num == 4 {
         (image_url, file_name) = get_iciba_image_url().await?;
         /*} else if num == 5 {
-            (image_url, file_name) = get_alphacoders_image_url().await?;*/
+        (image_url, file_name) = get_alphacoders_image_url().await?;*/
     } else if num == 6 {
         (image_url, file_name) = get_nasa_image_url().await?;
     } else {
@@ -375,7 +444,10 @@ async fn download_image() -> Result<String, Box<dyn std::error::Error>> {
     // 获取当前目录
     let current_dir = env::current_dir().expect("获取当前目录失败");
     // 获取文件的扩展名
-    let ext = Path::new(&file_name).extension().and_then(|ext| ext.to_str()).unwrap_or("jpg");
+    let ext = Path::new(&file_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("jpg");
     // 构建文件的绝对路径
     let file_path = current_dir.join("bing_wallpaper.".to_owned() + ext);
     // 创建文件
@@ -523,7 +595,8 @@ fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
             Option::from(path.as_ptr() as *mut c_void),
             SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
         );
-        if result.is_err() { // 设置失败
+        if result.is_err() {
+            // 设置失败
             // 设置失败，检查错误码
             let error = GetLastError();
             if error == ERROR_ACCESS_DENIED {
@@ -564,7 +637,8 @@ fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         // 方式3 IActiveDesktop
 
         // 方法4 https://learn.microsoft.com/zh-cn/uwp/api/windows.system.userprofile.userprofilepersonalizationsettings.trysetwallpaperimageasync
-    }.expect("设置壁纸失败");
+    }
+    .expect("设置壁纸失败");
 
     Ok(())
 }
@@ -603,7 +677,8 @@ fn set_lock_screen_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error:
 
         // https://learn.microsoft.com/zh-cn/uwp/api/windows.system.userprofile.lockscreen
         // SetImageFileAsync、SetImageStreamAsync
-        let file: StorageFile = StorageFile::GetFileFromPathAsync(&HSTRING::from(image_path))?.get()?;
+        let file: StorageFile =
+            StorageFile::GetFileFromPathAsync(&HSTRING::from(image_path))?.get()?;
         // 将 StorageFile 转换为 IStorageFile
         let file: IStorageFile = file.cast()?;
         let result = LockScreen::SetImageFileAsync(&file)?;
@@ -673,23 +748,23 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
         // 创建事件触发器
         // https://docs.microsoft.com/en-us/previous-versions//aa446887(v=vs.85)
         /*let trigger0 = triggers.Create(TASK_TRIGGER_EVENT);
-        let i_event_trigger: IEventTrigger = trigger0.unwrap().cast::<IEventTrigger>()?;
-        i_event_trigger.SetId(&BSTR::from("bing_wallpaper_event_trigger"))?;
-        // i_event_trigger.SetDelay(&BSTR::from("2007-01-01T08:00:00"))?;
-        // i_event_trigger.SetStartBoundary(&Local::now().to_rfc3339())?;
-        // 定义事件查询。触发器将启动任务，当收到事件时。
-        i_event_trigger.SetSubscription(&BSTR::from(r"<QueryList>
-    <Query Id='0'>
-        <Select Path='System'>
-            *[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]
-        </Select>
-    </Query>
-    <Query Id='1'>
-        <Select Path='System'>
-            *[System/Level=2]
-        </Select>
-    </Query>
-</QueryList>"))?;*/
+                let i_event_trigger: IEventTrigger = trigger0.unwrap().cast::<IEventTrigger>()?;
+                i_event_trigger.SetId(&BSTR::from("bing_wallpaper_event_trigger"))?;
+                // i_event_trigger.SetDelay(&BSTR::from("2007-01-01T08:00:00"))?;
+                // i_event_trigger.SetStartBoundary(&Local::now().to_rfc3339())?;
+                // 定义事件查询。触发器将启动任务，当收到事件时。
+                i_event_trigger.SetSubscription(&BSTR::from(r"<QueryList>
+            <Query Id='0'>
+                <Select Path='System'>
+                    *[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]
+                </Select>
+            </Query>
+            <Query Id='1'>
+                <Select Path='System'>
+                    *[System/Level=2]
+                </Select>
+            </Query>
+        </QueryList>"))?;*/
 
         // 创建定时触发器
         /*let trigger1 = triggers.Create(TASK_TRIGGER_TIME)?;
@@ -753,8 +828,8 @@ fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
 
         // 用于触发控制台连接或断开连接，远程连接或断开连接或工作站锁定或解锁通知的任务。
         let trigger11 = triggers.Create(TASK_TRIGGER_SESSION_STATE_CHANGE);
-        let i_ssc_trigger: ISessionStateChangeTrigger = trigger11.unwrap()
-            .cast::<ISessionStateChangeTrigger>()?;
+        let i_ssc_trigger: ISessionStateChangeTrigger =
+            trigger11.unwrap().cast::<ISessionStateChangeTrigger>()?;
         i_ssc_trigger.SetId(&BSTR::from("bing_wallpaper_ssc_trigger"))?;
         // 设置延迟时间
         // ISO 8601 duration format (e.g., "PT30M" for 30 minutes) P[nY][nM][nD][T[nH][nM][nS]]
@@ -825,11 +900,8 @@ fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
     // Windows API 函数通常使用宽字符串（UTF-16）。将 URL 转换为宽字符串并添加一个 null 终止符
     let url_wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
     let is_alive = unsafe {
-        let result = InternetCheckConnectionW(
-            PCWSTR(url_wide.as_ptr()),
-            FLAG_ICC_FORCE_CONNECTION,
-            0,
-        );
+        let result =
+            InternetCheckConnectionW(PCWSTR(url_wide.as_ptr()), FLAG_ICC_FORCE_CONNECTION, 0);
         match result {
             Ok(_) => true,
             Err(_) => false,
@@ -840,7 +912,7 @@ fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
     let is_alive = unsafe {
         let mut flags = INTERNET_CONNECTION::default();
         // 调用 InternetGetConnectedState 函数获取网络连接状态
-        InternetGetConnectedState(&mut flags, 0).is_err() ||
+        InternetGetConnectedState(&mut flags, Some(0)).is_err() ||
             // INTERNET_CONNECTION_MODEM：调制解调器连接。
             // INTERNET_CONNECTION_LAN：局域网连接。
             // INTERNET_CONNECTION_PROXY：代理连接。
@@ -858,12 +930,10 @@ fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
         }
     };
 
-
     // 方式4：使用 Windows API 函数 GetConnectivity
     let is_alive = unsafe {
-        let network_list_manager: INetworkListManager = unsafe {
-            CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL)?
-        };
+        let network_list_manager: INetworkListManager =
+            unsafe { CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL)? };
         let connectivity = network_list_manager.GetConnectivity()?;
         connectivity != NLM_CONNECTIVITY_DISCONNECTED
     };
@@ -897,16 +967,12 @@ fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
         // 第一次调用 GetAdaptersInfo 函数来获取所需的缓冲区大小
         GetAdaptersInfo(adapter_info, &mut out_buf_len);
         // Allocate memory for the buffer
-        adapter_info = Some(
-            std::mem::transmute(
-                std::alloc::alloc(
-                    std::alloc::Layout::from_size_align_unchecked(
-                        out_buf_len as usize,
-                        std::mem::align_of::<IP_ADAPTER_INFO>(),
-                    )
-                )
-            )
-        );
+        adapter_info = Some(std::mem::transmute(std::alloc::alloc(
+            std::alloc::Layout::from_size_align_unchecked(
+                out_buf_len as usize,
+                std::mem::align_of::<IP_ADAPTER_INFO>(),
+            ),
+        )));
         // Second call to GetAdaptersInfo to get the actual data
         GetAdaptersInfo(adapter_info, &mut out_buf_len);
         // Access the adapter info
@@ -953,8 +1019,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             arg!(
                 -t --taskschd "设置Windows任务计划，可在taskschd.msc中查看"
             )
-                .value_name("taskschd")
-                .required(false)
+            .value_name("taskschd")
+            .required(false),
         )
         .get_matches();
 
