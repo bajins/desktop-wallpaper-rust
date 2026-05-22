@@ -16,7 +16,7 @@ mod tests {
 
     #[test]
     fn test_1() {
-        // println!("1{:?}", aw!(get_alphacoders_image_url()).unwrap());
+        // println!("1{:?}", aw!(get_alphacoders_image_url())?);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -6,12 +6,11 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{ WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window},
     // window::{WindowBuilder},
 };
-use winit::window::Icon;
 use image::{ImageBuffer, Luma, DynamicImage, GenericImageView};
 use ico::{IconDir};
 
@@ -20,12 +19,12 @@ fn main() {
     if cfg!(target_os = "windows") {
         // 将PNG图标转换为ICO图标
         let ico_path = "assets/icon1.ico";
-        png_to_ico("assets/icon1_1.png", ico_path).expect("PNG转ICON失败");
+        png_to_ico("assets/icon1_1.png", ico_path).ok();
         // 创建Windows资源文件
         let mut res = winres::WindowsResource::new();
         res.set_icon(ico_path);
         res.set_manifest_file("assets/manifest.xml");
-        res.compile().unwrap();
+        res.compile().ok();
         // 删除生成的ICO图标文件
         match fs::remove_file(ico_path) {
             Err(e) => println!("文件删除错误: {}", e),
@@ -35,15 +34,13 @@ fn main() {
         // 编译`.rc`文件生成`.res`文件
         /*Command::new("windres")
             .args(&["src/icon.rc", "-O coff", "-o", "icon.res"])
-            .status()
-            .unwrap();
+            .status()?;
         Command::new("cargo")
             .args(&["rustc", "--"
                 , "-C", "link-arg=/ENTRY:mainCRTStartup"
                 , "-C", "link-arg=icon.res"
             ])
-            .status()
-            .unwrap();
+            .status()?;
         // 指示 cargo 将`.res`文件链接到最终的可执行文件中
         println!("cargo:rustc-link-search=native=icon.res");
         println!("cargo:rustc-link-lib=dylib={}", "icon");
@@ -91,7 +88,7 @@ fn main() {
         .with_always_on_top(false)*/
         // .with_window_icon(Some(include_bytes!("assets/icon1.png")?))
         .with_window_icon(Some(load_icon("assets/icon1.png")?))
-        .build(&event_loop).unwrap();
+        .build(&event_loop)?;
 
     // event_loop.set_control_flow(ControlFlow::Wait);
 
@@ -158,7 +155,7 @@ fn main() {
     Some(winit::window::Icon::from_raw(hicon as _))
 }*/
 
-// 将PNG文件转换为ICO文件
+/// 将PNG文件转换为ICO文件
 fn png_to_ico(png_path: &str, output_path: &str) -> Result<(), Box<dyn Error>> {
     // PNG文件数据
     // let png_data = fs::read(png_path)?;
@@ -177,11 +174,11 @@ fn png_to_ico(png_path: &str, output_path: &str) -> Result<(), Box<dyn Error>> {
     let (width, height) = rgba.dimensions();
     // let mut icon_image = ImageBuffer::new(width, height);
     let ico_img =ico::IconImage::from_rgba_data(width, height, rgba.into_raw());
-    icon_dir.add_entry(ico::IconDirEntry::encode(&ico_img).unwrap());
+    icon_dir.add_entry(ico::IconDirEntry::encode(&ico_img)?);
     // 将 ICO 保存到文件
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
-    icon_dir.write(&mut writer).unwrap();
+    icon_dir.write(&mut writer)?;
 
     Ok(())
 }
