@@ -14,15 +14,6 @@ use clap::{arg, command};
 async fn main() {
     // 用一个内部 async 块包裹所有可能出错的操作
     let result: Result<(), Box<dyn std::error::Error>> = async {
-        let image_path = images::download_image().await?;
-        utils::set_wallpaper(&image_path)?;
-        // task_scheduler::add_to_startup("", "")?;
-
-        /*match fs::remove_file(image_path) {
-            Err(e) => println!("壁纸文件删除错误: {}", e),
-            Ok(_) => {}
-        }*/
-
         let matches = command!()
             .arg(
                 arg!(
@@ -49,6 +40,16 @@ async fn main() {
                 task_scheduler::create_schedule,
             )?;
         }
+
+        let image_path = images::download_image().await?;
+        utils::set_wallpaper(&image_path)?;
+        // task_scheduler::add_to_startup("", "")?;
+
+        /*match fs::remove_file(image_path) {
+            Err(e) => println!("壁纸文件删除错误: {}", e),
+            Ok(_) => {}
+        }*/
+
         Ok(())
     }
     .await;

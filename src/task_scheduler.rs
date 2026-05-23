@@ -4,19 +4,7 @@ use windows::Win32::Foundation::{VARIANT_FALSE, VARIANT_TRUE};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
-use windows::Win32::System::TaskScheduler::{
-    IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction,
-    IIdleSettings, IIdleTrigger, ILogonTrigger, IMaintenanceSettings, IMonthlyDOWTrigger,
-    IMonthlyTrigger, IRegistrationInfo, IRegistrationTrigger, ISessionStateChangeTrigger,
-    ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITaskSettings2, ITaskSettings3,
-    ITimeTrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC,
-    TASK_COMPATIBILITY_V2_4, TASK_CONSOLE_CONNECT, TASK_CONSOLE_DISCONNECT, TASK_CREATE_OR_UPDATE,
-    TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_INTERACTIVE_TOKEN, TASK_REMOTE_CONNECT,
-    TASK_REMOTE_DISCONNECT, TASK_RUNLEVEL_HIGHEST, TASK_SESSION_LOCK, TASK_SESSION_UNLOCK,
-    TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE,
-    TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION,
-    TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY,
-};
+use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleSettings, IIdleTrigger, ILogonTrigger, IMaintenanceSettings, IMonthlyDOWTrigger, IMonthlyTrigger, IRegistrationInfo, IRegistrationTrigger, ISessionStateChangeTrigger, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITaskSettings2, ITaskSettings3, ITimeTrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_COMPATIBILITY_V2_4, TASK_CONSOLE_CONNECT, TASK_CONSOLE_DISCONNECT, TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_PARALLEL, TASK_LOGON_INTERACTIVE_TOKEN, TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD, TASK_LOGON_NONE, TASK_LOGON_PASSWORD, TASK_LOGON_S4U, TASK_LOGON_SERVICE_ACCOUNT, TASK_REMOTE_CONNECT, TASK_REMOTE_DISCONNECT, TASK_RUNLEVEL_HIGHEST, TASK_SESSION_LOCK, TASK_SESSION_UNLOCK, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
 use winreg::enums::HKEY_LOCAL_MACHINE;
@@ -29,7 +17,9 @@ use winreg::RegKey;
 pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
     // 获取当前执行程序的路径
     let exe_path = env::current_exe()?;
-    let exe_path_str = exe_path.to_str().ok_or_else(|| std::io::Error::last_os_error())?;
+    let exe_path_str = exe_path
+        .to_str()
+        .ok_or_else(|| std::io::Error::last_os_error())?;
 
     // 将所有 Windows API 操作放进一个闭包中
     // 闭包的返回值强制指定为 windows::core::Result<()>
@@ -77,20 +67,29 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
 
             // 安全选项 (Security Options)
             let principal = task_definition.Principal()?;
-
+            // principal.SetId()?;
+            // principal.SetDisplayName()?;
             // 运行账户 (User/Group): 默认为当前用户
             // principal.SetUserId(&BSTR::from("SYSTEM"))?;
 
             // 登录选项 (SetLogonType)
             // 可选值：
-            // TASK_LOGON_NONE: 未指定
-            // TASK_LOGON_PASSWORD: 使用密码（交互或后台）
-            // TASK_LOGON_S4U: 不管用户是否登录都要运行（不存储密码 S4U）
-            // TASK_LOGON_INTERACTIVE_TOKEN: 只在用户登录时运行
-            // TASK_LOGON_GROUP: 组账户
-            // TASK_LOGON_SERVICE_ACCOUNT: 服务账户（如 LocalService, NetworkService）
-            // TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD: 登录或有密码时
-            principal.SetLogonType(TASK_LOGON_INTERACTIVE_TOKEN)?;
+            // TASK_LOGON_NONE 0 未指定登录方式，用于非 NT 凭据
+            // TASK_LOGON_PASSWORD 1 用密码登录指定用户
+            //      对应UI界面上的 不管用户是否登录都要运行。
+            // TASK_LOGON_S4U 2 Service For User (S4U) 登录，非交互式
+            //      对应UI界面上的 不管用户是否登录都要运行。
+            //      不存储密码。该任务将只有访问本地资源的权限
+            // TASK_LOGON_INTERACTIVE_TOKEN 3 必须用户已登录，在已有交互会话中运行
+            //      对应UI界面上的 只在用户登录时运行。
+            // TASK_LOGON_GROUP 4 组激活：类似 INTERACTIVE_TOKEN，但组内任意成员均可触发
+            // TASK_LOGON_SERVICE_ACCOUNT 5 使用本地系统账号（LocalSystem/LocalService/NetworkService）
+            // TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD 6 优先用交互令牌，没有则用密码（新系统上基本等同 PASSWORD）
+            let logon_type = TASK_LOGON_S4U;
+            // 这里与调用RegisterTaskDefinition注册任务时传值作用一致
+            principal.SetLogonType(logon_type)?;
+
+            // principal.SetGroupId()?;
 
             // 使用最高权限运行 (Run with highest privileges)
             // 可选值：
@@ -98,8 +97,10 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // TASK_RUNLEVEL_HIGHEST: 管理员/最高权限
             principal.SetRunLevel(TASK_RUNLEVEL_HIGHEST)?;
 
+            let settings: ITaskSettings = task_definition.Settings()?;
+
             // 隐藏 (Hidden)
-            task_definition.Settings()?.SetHidden(VARIANT_FALSE)?;
+            settings.SetHidden(VARIANT_FALSE)?;
 
             // 配置 (Configure for) / 兼容性设置 (SetCompatibility)
             // 可选值：
@@ -109,9 +110,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // TASK_COMPATIBILITY_V2_2: Windows 8
             // TASK_COMPATIBILITY_V2_3: Windows 8.1
             // TASK_COMPATIBILITY_V2_4: Windows 10
-            task_definition
-                .Settings()?
-                .SetCompatibility(TASK_COMPATIBILITY_V2_4)?;
+            settings.SetCompatibility(TASK_COMPATIBILITY_V2_4)?;
 
             // ==========================================
             // 2. 触发器 (Triggers)
@@ -129,18 +128,18 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             i_once_trigger.SetStartBoundary(&BSTR::from("2024-01-01T12:00:00"))?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间 (RandomDelay)
-            i_once_trigger.SetRandomDelay(&BSTR::from("PT1M"))?;
+            i_once_trigger.SetRandomDelay(&BSTR::from("PT10S"))?;
             let rep_once = i_once_trigger.Repetition()?;
             // 重复任务间隔
             rep_once.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_once.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_once.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_once.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_once.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_once_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 过期时间 (Expire)
-            i_once_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_once_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_once_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -159,7 +158,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_daily.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_daily.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_daily.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_daily_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 过期时间 (Expire)
@@ -177,18 +176,18 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             i_weekly_trigger.SetDaysOfWeek(2)?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间 (RandomDelay)
-            i_weekly_trigger.SetRandomDelay(&BSTR::from("PT1M"))?;
+            i_weekly_trigger.SetRandomDelay(&BSTR::from("PT10S"))?;
             let rep_weekly = i_weekly_trigger.Repetition()?;
             // 重复任务间隔
             rep_weekly.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_weekly.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_weekly.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_weekly.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_weekly.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_weekly_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 过期时间 (Expire)
-            i_weekly_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_weekly_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_weekly_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -202,18 +201,18 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             i_monthly_trigger.SetDaysOfMonth(1)?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间 (RandomDelay)
-            i_monthly_trigger.SetRandomDelay(&BSTR::from("PT1M"))?;
+            i_monthly_trigger.SetRandomDelay(&BSTR::from("PT10S"))?;
             let rep_monthly = i_monthly_trigger.Repetition()?;
             // 重复任务间隔
             rep_monthly.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_monthly.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_monthly.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_monthly.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_monthly.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_monthly_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 过期时间 (Expire)
-            i_monthly_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_monthly_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_monthly_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -228,18 +227,18 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             i_mdow_trigger.SetStartBoundary(&BSTR::from("2024-01-01T08:00:00"))?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间 (RandomDelay)
-            i_mdow_trigger.SetRandomDelay(&BSTR::from("PT1M"))?;
+            i_mdow_trigger.SetRandomDelay(&BSTR::from("PT10S"))?;
             let rep_mdow = i_mdow_trigger.Repetition()?;
             // 重复任务间隔
             rep_mdow.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_mdow.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_mdow.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_mdow.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_mdow.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_mdow_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 过期时间 (Expire)
-            i_mdow_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_mdow_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_mdow_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -250,14 +249,14 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // i_logon_trigger.SetUserId(&BSTR::from("DOMAIN\\User"))?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间
-            i_logon_trigger.SetDelay(&BSTR::from("PT2M"))?;
+            i_logon_trigger.SetDelay(&BSTR::from("PT1M"))?;
             /*let rep_logon = t_logon.Repetition()?;
             // 重复任务间隔
             rep_logon.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
             rep_logon.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_logon.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_logon.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             t_logon.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -279,7 +278,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_boot.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_boot.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_boot.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_boot_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -297,15 +296,15 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 重复任务间隔
             rep_idle.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_idle.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_idle.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_idle.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_idle.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_idle_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
-            i_idle_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
+            // i_idle_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
             // 过期时间 (Expire)
-            i_idle_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_idle_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_idle_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -313,58 +312,133 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             let t_event = triggers.Create(TASK_TRIGGER_EVENT)?;
             let i_event_trigger: IEventTrigger = t_event.cast()?;
             // 基本设置 (通过 XML 定义筛选器)
-            i_event_trigger.SetSubscription(&BSTR::from(r"<QueryList><Query Id='0'><Select Path='System'>*[System[(EventID=100)]]</Select></Query></QueryList>"))?;
             // 定义事件查询。触发器将启动任务，当收到事件时。
-            /*i_event_trigger.SetSubscription(&BSTR::from(r"<QueryList>
-                <Query Id='0'>
-                    <Select Path='System'>
-                        *[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]
-                    </Select>
-                </Query>
-                <Query Id='1'>
-                    <Select Path='System'>
-                        *[System/Level=2]
-                    </Select>
-                </Query>
-            </QueryList>"))?;*/
+            i_event_trigger.SetSubscription(&BSTR::from(
+                r#"<QueryList>
+    <!-- 查询 0：电源故障排除事件。电源故障排除器生成的特定事件（通常是系统从睡眠/休眠恢复、电源状态变化等） -->
+    <Query Id='0' Path='System'>
+        <Select Path='System'>
+            *[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]
+        </Select>
+    </Query>
+
+    <!-- 查询 1：系统错误级别事件 -->
+    <Query Id='1' Path='System'>
+        <Select Path='System'>
+            *[System/Level=2]
+        </Select>
+    </Query>
+
+    <!-- 查询 2：用户登录（交互式 / 解锁等）—— 事件 ID 4624 需开启"审核登录事件" -->
+    <Query Id='2' Path='Security'>
+        <Select Path='Security'>
+            *[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and EventID=4624]]
+        </Select>
+    </Query>
+
+    <!-- 查询 3：登录类型 2：Interactive（本地键盘/屏幕登录） -->
+    <!-- <Query Id='3' Path='Security'>
+        <Select Path='Security'>
+            *[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and EventID=4624]]
+            and
+            *[EventData[Data[@Name='LogonType']='2']]
+        </Select>
+    </Query> -->
+    <!-- <Query Id="0" Path="Security">
+        <Select Path="Security">
+            *[System[(EventID=4624)]]
+            and
+            *[EventData[Data[@Name='LogonType']='2']]
+        </Select>
+    </Query> -->
+
+    <!-- 查询 4：登录类型 7：Unlock（通过 4624 事件识别的解锁） -->
+    <!-- <Query Id='4' Path='Security'>
+        <Select Path='Security'>
+            *[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and EventID=4624]]
+            and
+            *[EventData[Data[@Name='LogonType']='7']]
+        </Select>
+    </Query> -->
+
+    <!-- 查询 5：工作站解锁（Win+L 后再输入密码/指纹/Hello 解锁）—— 事件 ID 4801 必须启用"审核其他登录/注销事件" -->
+    <Query Id='5' Path='Security'>
+        <Select Path='Security'>
+            *[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and EventID=4801]]
+        </Select>
+    </Query>
+    <!-- <Query Id="5" Path="Security">
+        <Select Path="Security">
+            *[System[(EventID=4801)]]
+        </Select>
+    </Query> -->
+
+    <!-- 查询 6：工作站锁定（Win+L 锁屏）—— 事件 ID 4800 需要额外启用审计 -->
+    <Query Id='6' Path='Security'>
+        <Select Path='Security'>
+            *[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and EventID=4800]]
+        </Select>
+    </Query>
+    <!-- 用户注销 4634 / 4647 -->
+    <!-- <Query Id="6" Path="Security">
+        <Select Path="Security">
+            *[System[(EventID=4800 or EventID=4634 or EventID=4647)]]
+        </Select>
+    </Query> -->
+
+    <!-- 查询 7：系统日志（System）里的 Winlogon 通知事件。用户登录（会话连接）—— 事件 ID 7001 -->
+    <Query Id='7' Path='System'>
+        <Select Path='System'>
+            *[System[Provider[@Name='Microsoft-Windows-Winlogon'] and EventID=7001]]
+        </Select>
+    </Query>
+
+    <!-- 查询 8：用户注销/断开 —— 事件 ID 7002 -->
+    <Query Id='8' Path='System'>
+        <Select Path='System'>
+            *[System[Provider[@Name='Microsoft-Windows-Winlogon'] and EventID=7002]]
+        </Select>
+    </Query>
+</QueryList>"#,
+            ))?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间
-            i_event_trigger.SetDelay(&BSTR::from("PT1M"))?;
+            i_event_trigger.SetDelay(&BSTR::from("PT10S"))?;
             let rep_event = i_event_trigger.Repetition()?;
             // 重复任务间隔
             rep_event.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_event.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_event.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_event.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_event.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_event_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
-            i_event_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
+            // i_event_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
             // 过期时间 (Expire)
-            i_event_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_event_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
-            i_event_trigger.SetEnabled(VARIANT_FALSE)?;
+            i_event_trigger.SetEnabled(VARIANT_TRUE)?;
 
             // --- 2.10 创建/修改任务时 ---
             let t_reg = triggers.Create(TASK_TRIGGER_REGISTRATION)?;
             let i_reg_trigger: IRegistrationTrigger = t_reg.cast()?;
             // --- 高级设置 (Advanced Settings) ---
             // 任务最多延迟时间
-            i_reg_trigger.SetDelay(&BSTR::from("PT1M"))?;
+            i_reg_trigger.SetDelay(&BSTR::from("PT10S"))?;
             let rep_reg = i_reg_trigger.Repetition()?;
             // 重复任务间隔
             rep_reg.SetInterval(&BSTR::from("PT5M"))?;
             // 持续时间
-            rep_reg.SetDuration(&BSTR::from("PT1H"))?;
+            // rep_reg.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_reg.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_reg.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_reg_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
-            i_reg_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
+            // i_reg_trigger.SetStartBoundary(&BSTR::from("2024-01-01T00:00:00"))?;
             // 过期时间 (Expire)
-            i_reg_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
+            // i_reg_trigger.SetEndBoundary(&BSTR::from("2024-12-31T23:59:59"))?;
             // 启用
             i_reg_trigger.SetEnabled(VARIANT_FALSE)?;
 
@@ -386,7 +460,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_cc.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_cc.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_cc.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_cc_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -409,7 +483,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_cd.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_cd.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_cd.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_cd_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -434,7 +508,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_rc.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_rc.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_rc.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_rc_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -459,7 +533,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_rd.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_rd.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_rd.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_rd_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -484,7 +558,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_sl.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_sl.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_sl.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_sl_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -509,7 +583,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 持续时间
             rep_tssc_su.SetDuration(&BSTR::from("PT1H"))?;
             // 重复持续时间结束时停止所有运行的任务
-            rep_tssc_su.SetStopAtDurationEnd(VARIANT_TRUE)?;
+            rep_tssc_su.SetStopAtDurationEnd(VARIANT_FALSE)?;
             // 运行时间超过此值则停止执行
             i_tssc_su_trigger.SetExecutionTimeLimit(&BSTR::from("PT2H"))?;
             // 激活 (StartBoundary)
@@ -542,7 +616,6 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // ==========================================
             // 4. 条件 (Conditions)
             // ==========================================
-            let settings: ITaskSettings = task_definition.Settings()?;
 
             // 空闲 (Idle)
             let idle_settings: IIdleSettings = settings.IdleSettings()?;
@@ -586,18 +659,18 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // 尝试重新启动最多次数
             settings.SetRestartCount(3)?;
             // 如果任务运行时间超过以下时间，停止任务
-            settings.SetExecutionTimeLimit(&BSTR::from("PT5M"))?;
+            settings.SetExecutionTimeLimit(&BSTR::from("PT10M"))?;
             // 如果请求后任务还在运行，强行将其停止
-            settings.SetAllowHardTerminate(VARIANT_TRUE)?;
+            settings.SetAllowHardTerminate(VARIANT_FALSE)?;
             // 如果任务没有计划再次运行，则在此之后删除该任务
-            settings.SetDeleteExpiredTaskAfter(&BSTR::from("PT0S"))?;
+            // settings.SetDeleteExpiredTaskAfter(&BSTR::from("PT0S"))?;
             // 如果此任务已经运行，以下规则适用 (Multiple Instances)
             // 可选值：
             // TASK_INSTANCES_PARALLEL: 并行运行新实例
             // TASK_INSTANCES_QUEUE: 对新实例排队
             // TASK_INSTANCES_IGNORE_NEW: 请勿启动新实例
             // TASK_INSTANCES_STOP_EXISTING: 停止现有实例
-            settings.SetMultipleInstances(TASK_INSTANCES_IGNORE_NEW)?;
+            settings.SetMultipleInstances(TASK_INSTANCES_PARALLEL)?;
 
             // Windows 7+
             let settings2: ITaskSettings2 = settings.cast()?;
@@ -637,7 +710,7 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
                     TASK_CREATE_OR_UPDATE.0,
                     &VARIANT::default(),          // UserID
                     &VARIANT::default(),          // &empty_var // Password
-                    TASK_LOGON_INTERACTIVE_TOKEN, // LogonType
+                    logon_type, // LogonType
                     &VARIANT::default(),          // sddl
                 )
                 // .map(|_| ()) // 把 IRegisteredTask 转成 ()
