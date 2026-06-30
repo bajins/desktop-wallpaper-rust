@@ -1,7 +1,8 @@
 use std::error::Error;
-use std::ffi::c_void;
+use std::ffi::{c_void, OsStr};
 use std::os::windows::ffi::OsStrExt;
 use std::{io, mem};
+use std::time::Duration;
 use windows::core::{Interface, HSTRING, PCWSTR};
 use windows::Storage::{IStorageFile, StorageFile};
 use windows::System::UserProfile::LockScreen;
@@ -15,15 +16,15 @@ use windows::Win32::Networking::WinInet::{
     INTERNET_CONNECTION, INTERNET_CONNECTION_LAN, INTERNET_CONNECTION_MODEM,
     INTERNET_CONNECTION_PROXY, INTERNET_RAS_INSTALLED,
 };
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
-};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED};
 use windows::Win32::System::EventNotificationService::IsNetworkAlive;
 use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
+use windows::Win32::UI::Shell::{DesktopWallpaper, IDesktopWallpaper, DESKTOP_WALLPAPER_POSITION};
 use windows::Win32::UI::WindowsAndMessaging::{
     SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_GETDESKWALLPAPER,
     SPI_SETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
 };
+use crate::ui;
 
 /// 检查网络连接状态
 pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
@@ -224,16 +225,19 @@ pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error:
         );*/
         // 推荐使用的Unicode版本
         // 将Rust字符串转换为宽字符串，以匹配 SystemParametersInfoW 所需的格式
+        // 路径转 UTF-16 null-terminated —— 必须用 W 版本，A 版本会把指针解释错导致黑屏
         let path: Vec<u16> = std::ffi::OsStr::new(image_path)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
         // let path: Vec<u16> = image_path.encode_utf16().chain(std::iter::once(0)).collect();
         let result = SystemParametersInfoW(
-            SPI_SETDESKWALLPAPER,
-            0,
-            Option::from(path.as_ptr() as *mut c_void),
-            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
+            SPI_SETDESKWALLPAPER,                       // uiAction = 0x0014 WallpaperStyle 与 TileWallpaper
+            0,                                          // uiParam 对壁纸无意义，传 0
+            Option::from(path.as_ptr() as *mut c_void), // pvParam = 路径字符串指针
+            // SPIF_UPDATEINIFILE：把路径写入 HKCU\Control Panel\Desktop\WallPaper（持久化）
+            // SPIF_SENDCHANGE：向所有顶层窗口广播 WM_SETTINGCHANGE（wParam=SPI_SETDESKWALLPAPER），Explorer 收到后立即重绘壁纸
+            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,       // 写用户配置 + 广播 WM_SETTINGCHANGE
         );
         if result.is_err() {
             // 设置失败
@@ -247,6 +251,11 @@ pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error:
                 Err(windows::core::Error::from_hresult(result.into()))
             }
         } else {
+            // 让 WM_SETTINGCHANGE 先走完一圈广播
+            std::thread::sleep(Duration::from_millis(50));
+            // ui::refresh_desktop_shcn();
+            ui::refresh_desktop_f5();
+            ui::redraw_desktop();
             Ok(true)
         }
 
@@ -280,6 +289,30 @@ pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error:
     }
     .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+/// IDesktopWallpaper 多显示器、按屏指定、需要 SetPosition 控制 fit（Fill/Fit/Stretch/Tile/Center/Span），
+/// 现代接口，Win8+ 支持按显示器、span、slideshow
+fn set_wallpaper_all_monitors(path: &str) -> windows::core::Result<()> {
+    // 路径转 UTF-16 null-terminated
+    let mut wide: Vec<u16> = OsStr::new(path).encode_wide().collect();
+    wide.push(0);
+
+    unsafe {
+        // 1) 初始化 COM（apartment-threaded，与 shell 兼容）
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        // 2) 创建 DesktopWallpaper 实例，取 IDesktopWallpaper 接口
+        //    windows-rs 的 CoCreateInstance 是泛型的，按返回类型自动取 IID
+        let dw: IDesktopWallpaper = CoCreateInstance(&DesktopWallpaper, None, CLSCTX_ALL)?;
+
+        // 3) SetWallpaper 第一个参数 monitorid 传 NULL 表示应用到所有显示器
+        //    要按屏指定，则用GetMonitorDevicePathCount + GetMonitorDevicePathAt(i) 枚举得到设备路径再传入
+        dw.SetWallpaper(PCWSTR::null(), PCWSTR(wide.as_ptr()))?;
+        //  DESKTOP_WALLPAPER_POSITION 枚举（0=居中、1=填充、2=适应、3=拉伸、4=平铺、5=跨屏）
+        // dw.SetPosition(DESKTOP_WALLPAPER_POSITION::DWPOS_FILL)?;
+    }
     Ok(())
 }
 
