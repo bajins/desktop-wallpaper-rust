@@ -1,4 +1,4 @@
-use rand::{Rng, RngExt};
+use rand::{seq::SliceRandom, Rng, RngExt};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
 use scraper::{Html, Selector};
 use serde_json::Value;
@@ -9,9 +9,15 @@ use std::path::Path;
 use std::{env, io};
 use url::Url;
 
+/// 通用浏览器 User-Agent：用于图片下载与部分 API 请求，避免被图片 CDN 当作爬虫拒绝而返回空响应
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0";
+
 /// 下载必应每日一图
+/// https://blog.qzink.me/posts/%E5%BF%85%E5%BA%94%E5%A3%81%E7%BA%B8API%E5%8F%8A%E5%8E%86%E5%8F%B2%E5%AD%98%E6%A1%A3/
 pub async fn get_bing_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
+    // https://services.bingapis.com/ge-apps/api/v2/bwc/hpimages?mkt=zh-cn&theme=bing&defaultBrowser=ME&dhpSetToBing=True&dseSetToBing=True
+    // https://www.bing.com/hp/api/model?mkt=en-US
     let api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US";
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
@@ -45,9 +51,16 @@ pub async fn get_bing_image_url() -> anyhow::Result<(String, String), Box<dyn Er
 }
 
 /// 获取Windows Spotlight壁纸
+/// https://learn.microsoft.com/zh-cn/windows/configuration/windows-spotlight
+///
+/// https://api.qzink.me/spotlight
+/// https://zhuanlan.zhihu.com/p/637298844
+/// https://blog.qzink.me/tags/%E5%A3%81%E7%BA%B8/
+/// https://github.com/ORelio/Spotlight-Downloader/blob/master/SpotlightAPI.md
 pub async fn get_spotlight_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
-    let api_url = "https://arc.msn.com/v3/Delivery/Placement?pid=209567&fmt=json&cdm=1&pl=zh-CN&lc=zh-CN&ctry=CN";
+    // let api_url = "https://arc.msn.com/v3/Delivery/Placement?pid=209567&fmt=json&cdm=1&pl=zh-CN&lc=zh-CN&ctry=CN";
+    let api_url = "https://fd.api.iris.microsoft.com/v4/api/selection?placement=88000820&bcnt=4&fmt=json&locale=zh-CN&country=CN";
     // 发起网络请求
     let res = reqwest::get(api_url).await?;
     let body = res.text().await?;
@@ -58,11 +71,11 @@ pub async fn get_spotlight_image_url() -> anyhow::Result<(String, String), Box<d
             .as_str()
             .ok_or_else(|| std::io::Error::last_os_error())?,
     )?;
-    let image_url = item["ad"]["image_fullscreen_001_landscape"]["u"]
+    let image_url = item["ad"]["landscapeImage"]["asset"]
         .as_str()
         .ok_or_else(|| std::io::Error::last_os_error())?;
 
-    println!("{:?}", item["ad"]["hs1_title_text"]["tx"]);
+    println!("{:?}", item["ad"]["description"]);
 
     Ok((image_url.to_string(), String::from("")))
 }
@@ -76,7 +89,7 @@ pub async fn get_edge_chromium_image_url() -> anyhow::Result<(String, String), B
     // 创建一个请求构建器
     let mut builder: RequestBuilder = client.get(api_url);
     // 设置请求头
-    builder = builder.header(header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0");
+    builder = builder.header(header::USER_AGENT, USER_AGENT);
     // 发送请求并获取响应
     let response = builder.send().await?;
     // 检查响应状态码
@@ -262,7 +275,7 @@ pub async fn get_alphacoders_image_url() -> anyhow::Result<(String, String), Box
     );
     headers.insert(
         header::USER_AGENT,
-        header::HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0"),
+        header::HeaderValue::from_static(USER_AGENT),
     );
     // 设置请求头
     builder = builder.headers(headers);
@@ -322,12 +335,20 @@ pub async fn get_alphacoders_image_url() -> anyhow::Result<(String, String), Box
 }
 
 /// 获取NASA壁纸
+/// https://github.com/nasa/api-docs
+/// https://nasa.github.io/api-docs-stage
+/// https://github.com/nasa/apod-api
+/// https://wilsjame.github.io/how-to-nasa
 pub async fn get_nasa_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     // https://apod.nasa.gov/apod
     // let formatted_date = info.date.format("%Y-%m-%d").to_string();
     // &date={formatted_date}
-    let api_url = "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY";
+    // U0PqJ5UprbVQExkXc7ZgsGVfIM7Z1O8Uiv7g2hOO
+    // OcrpVpxqR9vJah1YaYVlgahUK7HURjAmWnciBsCz
+    // YbbMNWeWX2BqxoPKXEiWWcKMgNlUHhHXgqWG5XBt
+    // 4Qw6dtCAkjZa9G4zCnYDZeg0UjECBMcptxCHnJQt
+    let api_url = "https://api.nasa.gov/planetary/apod?api_key=5B6oJsSCQyekXZvNOKpsUhRPl1e7FHqjIAyHpybk";
     // 创建一个允许所有证书的信任锚
     /*let mut trust_anchor = RootCertStore::empty();
     trust_anchor.add_server_trust_anchors(&[TrustAnchor::from_pem(include_bytes!("any_certificate.pem"))?]);
@@ -380,33 +401,84 @@ pub async fn get_nasa_image_url() -> anyhow::Result<(String, String), Box<dyn Er
     Ok((image_url.to_string(), String::from("")))
 }
 
-/// 下载壁纸图片
-pub async fn download_image() -> anyhow::Result<String, Box<dyn std::error::Error>> {
-    // 获取图片的URL
-    let image_url;
-    let file_name;
-    let mut rng = rand::rng();
-    let num = rng.random_range(0..7);
-    if num == 1 {
-        (image_url, file_name) = get_spotlight_image_url().await?;
-    } else if num == 2 {
-        (image_url, file_name) = get_edge_chromium_image_url().await?;
-        /*} else if num == 3 {
-        (image_url, file_name) = get_pixabay_image_url().await?;*/
-    } else if num == 4 {
-        (image_url, file_name) = get_iciba_image_url().await?;
-        /*} else if num == 5 {
-        (image_url, file_name) = get_alphacoders_image_url().await?;*/
-    } else if num == 6 {
-        (image_url, file_name) = get_nasa_image_url().await?;
-    } else {
-        (image_url, file_name) = get_bing_image_url().await?;
-    }
-    // 下载图片
-    let response = reqwest::get(&image_url).await?;
+/// 壁纸源数量（启用源数）。增删源时同步修改此处与 `try_one_source` 的 match 分支
+const SOURCE_COUNT: usize = 5;
 
+/// 下载壁纸图片
+///
+/// 随机打乱所有候选源顺序，依次尝试完整流程（获取URL→下载→保存），
+/// 任一源成功即返回文件路径；全部失败则聚合各源错误信息后抛出，
+/// 由顶层 `main` 统一弹窗，避免单个源故障导致整个程序退出。
+///
+/// 候选源各 1/5 = 20% 均等（打乱后第一个即随机选中），杜绝魔法数字 0..7 + 被注释分支落 else 导致 Bing 占 42.9% 的分布倾斜
+/// 暂未启用：get_pixabay_image_url、get_alphacoders_image_url
+/// 增删源：改 `SOURCE_COUNT` 与 `try_one_source` 的 match 分支
+pub async fn download_image() -> anyhow::Result<String, Box<dyn std::error::Error>> {
+    let mut rng = rand::rng();
+    // 随机打乱源索引顺序：第一个即随机选中的源，其后为失败时的 fallback 顺序
+    let mut order: Vec<usize> = (0..SOURCE_COUNT).collect();
+    order.shuffle(&mut rng);
+
+    // 依次尝试各源，记录失败原因以便最终聚合
+    let mut errors: Vec<String> = Vec::new();
+    for &i in &order {
+        match try_one_source(i).await {
+            Ok(path) => return Ok(path),
+            Err(e) => {
+                eprintln!("源 {i} 失败，尝试下一个源: {e}");
+                errors.push(format!("源{i}: {e}"));
+            }
+        }
+    }
+    // 所有源均失败，聚合错误信息抛出（顶层 main 会统一弹窗）
+    Err(Box::<dyn std::error::Error>::from(format!(
+        "所有壁纸源均不可用 | {}",
+        errors.join(" ; ")
+    )))
+}
+
+/// 尝试单个壁纸源的完整流程：获取图片 URL → 下载 → 保存到 `bing_wallpaper.<ext>`
+///
+/// 任一步失败返回带原因的 `String` 错误，供外层 `download_image` 换源重试时聚合。
+///
+/// `source` 壁纸源索引（`0..SOURCE_COUNT`），对应下方 match 分支
+async fn try_one_source(source: usize) -> Result<String, String> {
+    // 1. 获取图片的 URL 与文件名（文件名用于推断扩展名）
+    let (image_url, file_name) = match source {
+        0 => get_bing_image_url().await,
+        1 => get_spotlight_image_url().await,
+        2 => get_edge_chromium_image_url().await,
+        3 => get_iciba_image_url().await,
+        4 => get_nasa_image_url().await,
+        _ => unreachable!(),
+    }
+    .map_err(|e| format!("获取URL失败: {e}"))?;
+
+    // 2. 下载图片：带 UA 的 Client，避免部分图片 CDN 拒绝裸请求而返回空响应
+    let client = Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|e| format!("构建HTTP客户端失败: {e}"))?;
+    let response = client
+        .get(&image_url)
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {e}"))?
+        // 4xx/5xx 视为失败，交由外层换源重试，避免落盘错误页或空文件
+        .error_for_status()
+        .map_err(|e| format!("下载状态码异常: {e}"))?;
+    let content = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取图片字节失败: {e}"))?;
+    // 空响应体：常见于被 CDN 拒绝或图片链接失效，落盘即 0kb，故判为失败触发换源
+    if content.is_empty() {
+        return Err(format!("图片内容为空: {image_url}"));
+    }
+
+    // 3. 保存到程序当前目录下的 bing_wallpaper.<ext>
     // 获取当前目录
-    let current_dir = env::current_dir().expect("获取当前目录失败");
+    let current_dir = env::current_dir().map_err(|e| format!("获取当前目录失败: {e}"))?;
     // 获取文件的扩展名
     let ext = Path::new(&file_name)
         .extension()
@@ -414,13 +486,13 @@ pub async fn download_image() -> anyhow::Result<String, Box<dyn std::error::Erro
         .unwrap_or("jpg");
     // 构建文件的绝对路径
     let file_path = current_dir.join("bing_wallpaper.".to_owned() + ext);
-    // 创建文件
-    let mut file = File::create(&file_path)?;
-    let content = response.bytes().await?;
-    file.write_all(&content)?;
+    // 创建文件并写入
+    let mut file = File::create(&file_path).map_err(|e| format!("创建文件失败: {e}"))?;
+    file.write_all(&content)
+        .map_err(|e| format!("写入文件失败: {e}"))?;
 
     Ok(file_path
         .to_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?
+        .ok_or("文件路径转字符串失败")?
         .to_string())
 }
