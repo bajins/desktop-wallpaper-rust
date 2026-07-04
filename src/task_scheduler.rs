@@ -4,7 +4,20 @@ use windows::Win32::Foundation::{VARIANT_FALSE, VARIANT_TRUE};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
-use windows::Win32::System::TaskScheduler::{IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction, IIdleSettings, IIdleTrigger, ILogonTrigger, IMaintenanceSettings, IMonthlyDOWTrigger, IMonthlyTrigger, IRegistrationInfo, IRegistrationTrigger, ISessionStateChangeTrigger, ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITaskSettings2, ITaskSettings3, ITimeTrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC, TASK_COMPATIBILITY_V2_4, TASK_CONSOLE_CONNECT, TASK_CONSOLE_DISCONNECT, TASK_CREATE_OR_UPDATE, TASK_INSTANCES_IGNORE_NEW, TASK_INSTANCES_PARALLEL, TASK_LOGON_INTERACTIVE_TOKEN, TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD, TASK_LOGON_NONE, TASK_LOGON_PASSWORD, TASK_LOGON_S4U, TASK_LOGON_SERVICE_ACCOUNT, TASK_REMOTE_CONNECT, TASK_REMOTE_DISCONNECT, TASK_RUNLEVEL_HIGHEST, TASK_SESSION_LOCK, TASK_SESSION_UNLOCK, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY, TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY, TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_SESSION_STATE_CHANGE, TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY};
+use windows::Win32::System::TaskScheduler::{
+    IAction, IActionCollection, IBootTrigger, IDailyTrigger, IEventTrigger, IExecAction,
+    IIdleSettings, IIdleTrigger, ILogonTrigger, IMaintenanceSettings, IMonthlyDOWTrigger,
+    IMonthlyTrigger, IRegistrationInfo, IRegistrationTrigger, ISessionStateChangeTrigger,
+    ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, ITaskSettings2, ITaskSettings3,
+    ITimeTrigger, ITriggerCollection, IWeeklyTrigger, TaskScheduler, TASK_ACTION_EXEC,
+    TASK_COMPATIBILITY_V2_4, TASK_CONSOLE_CONNECT, TASK_CONSOLE_DISCONNECT, TASK_CREATE_OR_UPDATE
+    , TASK_INSTANCES_PARALLEL, TASK_LOGON_INTERACTIVE_TOKEN
+    , TASK_REMOTE_CONNECT, TASK_REMOTE_DISCONNECT, TASK_RUNLEVEL_HIGHEST,
+    TASK_SESSION_LOCK, TASK_SESSION_UNLOCK, TASK_TRIGGER_BOOT, TASK_TRIGGER_DAILY,
+    TASK_TRIGGER_EVENT, TASK_TRIGGER_IDLE, TASK_TRIGGER_LOGON, TASK_TRIGGER_MONTHLY,
+    TASK_TRIGGER_MONTHLYDOW, TASK_TRIGGER_REGISTRATION, TASK_TRIGGER_SESSION_STATE_CHANGE,
+    TASK_TRIGGER_TIME, TASK_TRIGGER_WEEKLY,
+};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
 use winreg::enums::HKEY_LOCAL_MACHINE;
@@ -85,7 +98,13 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
             // TASK_LOGON_GROUP 4 组激活：类似 INTERACTIVE_TOKEN，但组内任意成员均可触发
             // TASK_LOGON_SERVICE_ACCOUNT 5 使用本地系统账号（LocalSystem/LocalService/NetworkService）
             // TASK_LOGON_INTERACTIVE_TOKEN_OR_PASSWORD 6 优先用交互令牌，没有则用密码（新系统上基本等同 PASSWORD）
-            let logon_type = TASK_LOGON_S4U;
+            // 壁纸程序必须运行在用户交互桌面会话：
+            // SystemParametersInfo(SPI_SETDESKWALLPAPER) 与 IDesktopWallpaper 均为 per-session 桌面资源，
+            // 写入当前会话的 HKCU\Control Panel\Desktop\Wallpaper 并向当前桌面广播 WM_SETTINGCHANGE。
+            // S4U/PASSWORD（"不管是否登录都运行"）会落到 Session 0 非交互会话，壁纸设置对可见桌面无效，
+            // 表现为登录/解锁后壁纸不变。故必须用 INTERACTIVE_TOKEN（"只在用户登录时运行"），
+            // 任务才能进入用户桌面会话正确设置壁纸。
+            let logon_type = TASK_LOGON_INTERACTIVE_TOKEN;
             // 这里与调用RegisterTaskDefinition注册任务时传值作用一致
             principal.SetLogonType(logon_type)?;
 
@@ -708,10 +727,10 @@ pub fn create_schedule() -> anyhow::Result<(), Box<dyn std::error::Error>> {
                     &BSTR::from("SetBingWallpaper"),
                     &task_definition,
                     TASK_CREATE_OR_UPDATE.0,
-                    &VARIANT::default(),          // UserID
-                    &VARIANT::default(),          // &empty_var // Password
-                    logon_type, // LogonType
-                    &VARIANT::default(),          // sddl
+                    &VARIANT::default(), // UserID
+                    &VARIANT::default(), // &empty_var // Password
+                    logon_type,          // LogonType
+                    &VARIANT::default(), // sddl
                 )
                 // .map(|_| ()) // 把 IRegisteredTask 转成 ()
                 .map_err(|e| e)?;
