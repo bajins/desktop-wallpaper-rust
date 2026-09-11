@@ -1,4 +1,4 @@
-use rand::{seq::SliceRandom, Rng, RngExt};
+use rand::{seq::SliceRandom, RngExt};
 use reqwest::{header, Client, RequestBuilder, StatusCode};
 use scraper::{Html, Selector};
 use serde_json::Value;
@@ -6,21 +6,41 @@ use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 use std::{env, io};
 use url::Url;
 
 /// 通用浏览器 User-Agent：用于图片下载与部分 API 请求，避免被图片 CDN 当作爬虫拒绝而返回空响应
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0";
 
+/// 单次 HTTP 请求（含读取响应体）的超时上限
+///
+/// 禁止无超时请求：网络异常时请求会无限挂起，进程长时间存活，
+/// 叠加任务计划高频触发会形成进程堆积（进程风暴治理的一环）
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 构建统一的 HTTP 客户端：带浏览器 UA（避免图片 CDN 拒绝裸请求返回空响应）与请求超时
+///
+/// 所有网络请求必须经由此函数获取客户端，
+/// 禁止裸用 `reqwest::get` / `Client::new()`——二者默认无超时，会导致进程挂死堆积
+fn http_client() -> Client {
+    Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        // 构建失败仅发生在 TLS 后端初始化异常等底层场景，直接 panic 暴露问题
+        .expect("构建 HTTP 客户端失败")
+}
+
 /// 下载必应每日一图
 /// https://blog.qzink.me/posts/%E5%BF%85%E5%BA%94%E5%A3%81%E7%BA%B8API%E5%8F%8A%E5%8E%86%E5%8F%B2%E5%AD%98%E6%A1%A3/
-pub async fn get_bing_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     // https://services.bingapis.com/ge-apps/api/v2/bwc/hpimages?mkt=zh-cn&theme=bing&defaultBrowser=ME&dhpSetToBing=True&dseSetToBing=True
     // https://www.bing.com/hp/api/model?mkt=en-US
     let api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US";
-    // 发起网络请求
-    let res = reqwest::get(api_url).await?;
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let res = http_client().get(api_url).send().await?;
     let body = res.text().await?;
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
@@ -57,12 +77,12 @@ pub async fn get_bing_image_url() -> anyhow::Result<(String, String), Box<dyn Er
 /// https://zhuanlan.zhihu.com/p/637298844
 /// https://blog.qzink.me/tags/%E5%A3%81%E7%BA%B8/
 /// https://github.com/ORelio/Spotlight-Downloader/blob/master/SpotlightAPI.md
-pub async fn get_spotlight_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     // let api_url = "https://arc.msn.com/v3/Delivery/Placement?pid=209567&fmt=json&cdm=1&pl=zh-CN&lc=zh-CN&ctry=CN";
     let api_url = "https://fd.api.iris.microsoft.com/v4/api/selection?placement=88000820&bcnt=4&fmt=json&locale=zh-CN&country=CN";
-    // 发起网络请求
-    let res = reqwest::get(api_url).await?;
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let res = http_client().get(api_url).send().await?;
     let body = res.text().await?;
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
@@ -81,11 +101,11 @@ pub async fn get_spotlight_image_url() -> anyhow::Result<(String, String), Box<d
 }
 
 /// 获取Edge Chromium壁纸
-pub async fn get_edge_chromium_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn Error>> {
     //
     let api_url = "https://ntp.msn.com/edge/ntp?locale=zh-cn";
-    // 发起网络请求
-    let client = Client::new();
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let client = http_client();
     // 创建一个请求构建器
     let mut builder: RequestBuilder = client.get(api_url);
     // 设置请求头
@@ -130,8 +150,8 @@ pub async fn get_edge_chromium_image_url() -> anyhow::Result<(String, String), B
     ?expType=AppConfig&expInstance=default&apptype=edgeChromium&v="
         .to_owned()
         + version;
-    // 发起网络请求
-    let res = reqwest::get(api_url).await?;
+    // 发起网络请求（统一客户端：带 UA + 超时，复用本函数已构建的 client）
+    let res = client.get(api_url).send().await?;
     let body = res.text().await?;
     let v: Value = serde_json::from_str(&body)?;
     let datas = v["configs"]["BackgroundImageWC/default"]["properties"]["cmsImage"]["data"]
@@ -148,7 +168,7 @@ pub async fn get_edge_chromium_image_url() -> anyhow::Result<(String, String), B
     let image = data_map
         .iter()
         .max_by_key(|(key, _value)| key.to_string()[1..].parse::<i64>().ok())
-        .map(|(key, _value)| _value);
+        .map(|(_key, _value)| _value);
     // 获取图片的URL
     let mut image_url = v["configs"]["StickyPeek/default"]["properties"]
         ["stickyPeekLightCoachmarkMainImageURL"]
@@ -176,11 +196,11 @@ pub async fn get_edge_chromium_image_url() -> anyhow::Result<(String, String), B
 }
 
 /// 获取Pixabay壁纸
-pub async fn get_pixabay_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_pixabay_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     let api_url = "https://pixabay.com/api/?key=30271602-41319186b7198e7712c568e90&lang=zh&editors_choice=true";
-    // 发起网络请求
-    let res = reqwest::get(api_url).await?;
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let res = http_client().get(api_url).send().await?;
     let body = res.text().await?;
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
@@ -200,11 +220,11 @@ pub async fn get_pixabay_image_url() -> anyhow::Result<(String, String), Box<dyn
 }
 
 /// 获取金山词霸壁纸
-pub async fn get_iciba_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_iciba_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     let api_url = "https://open.iciba.com/dsapi";
-    // 发起网络请求
-    let res = reqwest::get(api_url).await?;
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let res = http_client().get(api_url).send().await?;
     let body = res.text().await?;
     println!("{:?}", body);
     let v: Value = serde_json::from_str(&body)?;
@@ -218,11 +238,11 @@ pub async fn get_iciba_image_url() -> anyhow::Result<(String, String), Box<dyn E
 }
 
 /// 获取Alphacoders壁纸
-pub async fn get_alphacoders_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     let api_url = "https://alphacoders.com/nature-4k-wallpapers";
-    // 发起网络请求
-    let client = Client::new();
+    // 发起网络请求（统一客户端：带 UA + 超时）
+    let client = http_client();
     // 创建一个请求构建器
     let mut builder: RequestBuilder = client.get(api_url);
     // 定义请求头
@@ -339,7 +359,7 @@ pub async fn get_alphacoders_image_url() -> anyhow::Result<(String, String), Box
 /// https://nasa.github.io/api-docs-stage
 /// https://github.com/nasa/apod-api
 /// https://wilsjame.github.io/how-to-nasa
-pub async fn get_nasa_image_url() -> anyhow::Result<(String, String), Box<dyn Error>> {
+pub async fn get_nasa_image_url() -> Result<(String, String), Box<dyn Error>> {
     // 壁纸API的URL
     // https://apod.nasa.gov/apod
     // let formatted_date = info.date.format("%Y-%m-%d").to_string();
@@ -358,6 +378,8 @@ pub async fn get_nasa_image_url() -> anyhow::Result<(String, String), Box<dyn Er
         .with_root_certificates(trust_anchor);*/
     // 创建一个允许所有证书的reqwest客户端
     let client = Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(REQUEST_TIMEOUT)
         .danger_accept_invalid_certs(true) // 接受无效主机名
         // .use_rustls_tls()
         // .rustls_client_config(tls_builder.build())
@@ -413,7 +435,7 @@ const SOURCE_COUNT: usize = 5;
 /// 候选源各 1/5 = 20% 均等（打乱后第一个即随机选中），杜绝魔法数字 0..7 + 被注释分支落 else 导致 Bing 占 42.9% 的分布倾斜
 /// 暂未启用：get_pixabay_image_url、get_alphacoders_image_url
 /// 增删源：改 `SOURCE_COUNT` 与 `try_one_source` 的 match 分支
-pub async fn download_image() -> anyhow::Result<String, Box<dyn std::error::Error>> {
+pub async fn download_image() -> Result<String, Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
     // 随机打乱源索引顺序：第一个即随机选中的源，其后为失败时的 fallback 顺序
     let mut order: Vec<usize> = (0..SOURCE_COUNT).collect();
@@ -454,11 +476,8 @@ async fn try_one_source(source: usize) -> Result<String, String> {
     }
     .map_err(|e| format!("获取URL失败: {e}"))?;
 
-    // 2. 下载图片：带 UA 的 Client，避免部分图片 CDN 拒绝裸请求而返回空响应
-    let client = Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| format!("构建HTTP客户端失败: {e}"))?;
+    // 2. 下载图片：统一客户端（带 UA + 超时），超时/失败会交由外层换源重试
+    let client = http_client();
     let response = client
         .get(&image_url)
         .send()

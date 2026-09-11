@@ -112,12 +112,18 @@ pub fn ask_yes_no_with_help(text: &str, caption: &str, help_url: &str) -> Dialog
         *url.borrow_mut() = help_url.to_string();
     });
 
+    // 文本必须绑定局部变量：结构体字段内联的 HSTRING::from(text).as_ptr() 产生的临时值
+    // 会在 let 语句结束时释放，MessageBoxIndirectW 随后读到悬垂指针导致弹窗内容乱码。
+    // 对比 show_info 的 MessageBoxW(参数位置临时值)存活到调用结束，是安全写法
+    let text_h = HSTRING::from(text);
+    let caption_h = HSTRING::from(caption);
+
     let params = MSGBOXPARAMSW {
         cbSize: size_of::<MSGBOXPARAMSW>() as u32, // 识别结构体版本
         hwndOwner: HWND::default(),
         hInstance: HINSTANCE::default(), // 自定义图标/字符串资源所在的模块句柄
-        lpszText: PCWSTR(HSTRING::from(text).as_ptr()), // 内容
-        lpszCaption: PCWSTR(HSTRING::from(caption).as_ptr()), // 标题
+        lpszText: PCWSTR(text_h.as_ptr()), // 内容
+        lpszCaption: PCWSTR(caption_h.as_ptr()), // 标题
         dwStyle: MB_YESNO
             // | MB_YESNOCANCEL
             | MB_HELP
@@ -150,7 +156,10 @@ pub fn ask_yes_no_with_help(text: &str, caption: &str, help_url: &str) -> Dialog
     }
 }
 
-/// 高层封装：显示确认框 → 用户点"是"则执行闭包，出错时自动弹错误框
+/// 高层封装：显示确认框 → 用户点"是"则执行闭包
+///
+/// 出错时**不在此处弹窗**，直接向调用方上抛——由顶层错误处理统一弹窗，
+/// 避免同一错误在此处与顶层各弹一次形成双重弹窗
 pub fn confirm_and_run(
     text: &str,
     caption: &str,
@@ -158,20 +167,16 @@ pub fn confirm_and_run(
     on_yes: impl FnOnce() -> Result<(), Box<dyn std::error::Error>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match ask_yes_no_with_help(text, caption, help_url) {
-        DialogResult::Yes => {
-            if let Err(e) = on_yes() {
-                show_error(&e.to_string());
-                return Err(e);
-            }
-        }
+        DialogResult::Yes => on_yes(),
         DialogResult::No => {
             println!("用户点击了 否");
+            Ok(())
         }
         other => {
             println!("其他: {:?}", other);
+            Ok(())
         }
     }
-    Ok(())
 }
 
 /// 等价于在桌面右键菜单点击"刷新"——通知 Shell 重新枚举桌面图标（桌面图标重新枚举、图标缓存重读、图标/关联变更）

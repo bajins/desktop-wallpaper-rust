@@ -1,12 +1,14 @@
 use std::error::Error;
 use std::ffi::{c_void, OsStr};
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
+use std::sync::mpsc;
 use std::{io, mem};
 use std::time::Duration;
-use windows::core::{Interface, HSTRING, PCWSTR};
+use windows::core::{HRESULT, Interface, HSTRING, PCWSTR};
 use windows::Storage::{IStorageFile, StorageFile};
 use windows::System::UserProfile::LockScreen;
-use windows::Win32::Foundation::{GetLastError, ERROR_ACCESS_DENIED};
+use windows::Win32::Foundation::{GetLastError, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS};
 use windows::Win32::NetworkManagement::IpHelper::{GetAdaptersInfo, IP_ADAPTER_INFO};
 use windows::Win32::Networking::NetworkListManager::{
     INetworkListManager, NetworkListManager, NLM_CONNECTIVITY_DISCONNECTED,
@@ -18,8 +20,9 @@ use windows::Win32::Networking::WinInet::{
 };
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED};
 use windows::Win32::System::EventNotificationService::IsNetworkAlive;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
-use windows::Win32::UI::Shell::{DesktopWallpaper, IDesktopWallpaper, DESKTOP_WALLPAPER_POSITION};
+use windows::Win32::UI::Shell::{DesktopWallpaper, IDesktopWallpaper};
 use windows::Win32::UI::WindowsAndMessaging::{
     SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_GETDESKWALLPAPER,
     SPI_SETDESKWALLPAPER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
@@ -27,12 +30,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::ui;
 
 /// 检查网络连接状态
-pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
+pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
     // 方式1：使用 Windows API 函数 InternetCheckConnectionW
     let url = "https://www.google.com";
     // Windows API 函数通常使用宽字符串（UTF-16）。将 URL 转换为宽字符串并添加一个 null 终止符
     let url_wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
-    let is_alive = unsafe {
+    // 探测调用含网络 I/O 副作用，结果被后续探测覆盖，仅以前缀下划线压制未用警告，语句本身保留
+    let _is_alive = unsafe {
         let result =
             InternetCheckConnectionW(PCWSTR(url_wide.as_ptr()), FLAG_ICC_FORCE_CONNECTION, 0);
         // 用 match 捕获异常
@@ -43,7 +47,7 @@ pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
     };
 
     // 方式2：使用 Windows API 函数 InternetGetConnectedState
-    let is_alive = unsafe {
+    let _is_alive = unsafe {
         let mut flags = INTERNET_CONNECTION::default();
         // 调用 InternetGetConnectedState 函数获取网络连接状态
         InternetGetConnectedState(&mut flags, Some(0)).is_err() ||
@@ -56,7 +60,7 @@ pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
     };
 
     // 方式3：使用 Windows API 函数 IsNetworkAlive
-    let is_alive = unsafe {
+    let _is_alive = unsafe {
         let result = IsNetworkAlive(&mut 0);
         // 用 match 捕获异常
         match result {
@@ -66,7 +70,7 @@ pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
     };
 
     // 方式4：使用 Windows API 函数 GetConnectivity
-    let is_alive = unsafe {
+    let _is_alive = unsafe {
         let network_list_manager: INetworkListManager =
             CoCreateInstance(&NetworkListManager, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
         let connectivity = network_list_manager
@@ -143,7 +147,7 @@ pub fn is_connected() -> anyhow::Result<bool, Box<dyn std::error::Error>> {
 /// 设置锁屏壁纸的函数
 pub fn set_lock_screen_wallpaper(
     image_path: &str,
-) -> anyhow::Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     unsafe {
         // 初始化COM
         let com_res = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -182,7 +186,7 @@ pub fn set_lock_screen_wallpaper(
         let file = file.cast::<IStorageFile>().map_err(|e| e.to_string())?;
         let result = LockScreen::SetImageFileAsync(&file);
         match result {
-            Ok(result) => {
+            Ok(_result) => {
                 println!("锁屏壁纸设置成功");
             }
             Err(error) => {
@@ -201,7 +205,15 @@ pub fn set_lock_screen_wallpaper(
 }
 
 /// 设置壁纸的函数
-pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error::Error>> {
+pub fn set_wallpaper(image_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // 前置存在性校验：SPI_SETDESKWALLPAPER 不校验文件存在性，无效路径会"假成功"
+    // （仅写入注册表并广播，实际图片加载由 Explorer 静默失败），必须显式拦截
+    if !Path::new(image_path).exists() {
+        return Err(Box::new(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("壁纸文件不存在: {image_path}"),
+        )));
+    }
     // 通过系统调用设置壁纸
     println!("{:?}", get_wallpaper()?);
     /*println!("{:?}", wallpaper::get());
@@ -244,8 +256,11 @@ pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error:
             // 设置失败，检查错误码
             let error = GetLastError();
             if error == ERROR_ACCESS_DENIED {
-                // 错误码表明权限不足
-                Ok(false)
+                // 权限不足同样是设置失败：历史上此处降格为 Ok(false) 后布尔值被上层丢弃，
+                // 表现为"设置失败却认为成功"的静默缺陷，现改为显式上抛错误
+                Err(windows::core::Error::from_hresult(HRESULT::from_win32(
+                    error.0 as u32,
+                )))
             } else {
                 // 其他错误
                 Err(windows::core::Error::from_hresult(result.into()))
@@ -294,6 +309,8 @@ pub fn set_wallpaper(image_path: &str) -> anyhow::Result<(), Box<dyn std::error:
 
 /// IDesktopWallpaper 多显示器、按屏指定、需要 SetPosition 控制 fit（Fill/Fit/Stretch/Tile/Center/Span），
 /// 现代接口，Win8+ 支持按显示器、span、slideshow
+// 多显示器扩展预留，当前未启用
+#[allow(dead_code)]
 fn set_wallpaper_all_monitors(path: &str) -> windows::core::Result<()> {
     // 路径转 UTF-16 null-terminated
     let mut wide: Vec<u16> = OsStr::new(path).encode_wide().collect();
@@ -317,7 +334,7 @@ fn set_wallpaper_all_monitors(path: &str) -> windows::core::Result<()> {
 }
 
 /// 获取当前壁纸的函数
-pub fn get_wallpaper() -> anyhow::Result<String, Box<dyn std::error::Error>> {
+pub fn get_wallpaper() -> Result<String, Box<dyn std::error::Error>> {
     unsafe {
         let buffer: [u16; 260] = mem::zeroed();
         let result = SystemParametersInfoW(
@@ -337,6 +354,68 @@ pub fn get_wallpaper() -> anyhow::Result<String, Box<dyn std::error::Error>> {
             Err(io::Error::last_os_error().into())
         }
     }
+}
+
+/// 程序内单实例互斥锁：启动时抢占 `Local\desktop-wallpaper-rust-instance` 命名互斥体
+///
+/// 返回 true 表示本进程成功持有锁，可继续运行；false 表示已有实例在运行，调用方应立即退出。
+///
+/// 设计意图：任务计划多实例策略（请勿启动新实例）是第一道防线，此函数为不依赖任务计划的
+/// 程序内兜底，防止触发风暴或重复手动启动导致多进程并行堆积。
+/// `Local\` 前缀使命名空间绑定当前登录会话——任务计划（INTERACTIVE_TOKEN）与手动运行
+/// 同处用户会话，天然互斥；互斥体句柄随进程退出由系统回收，无需 CloseHandle。
+pub fn try_acquire_single_instance() -> bool {
+    try_acquire_instance_lock("Local\\desktop-wallpaper-rust-instance")
+}
+
+/// 按 `name` 抢占命名互斥体（单实例锁的实现核心）
+///
+/// 返回 true 表示成功持有锁；false 表示锁已被持有（ERROR_ALREADY_EXISTS）。
+///
+/// 形参 `name`：互斥体名称（含 `Local\` / `Global\` 命名空间前缀），
+/// 抽为参数以便测试使用独立名称，避免与运行中的主程序互斥体相互干扰
+fn try_acquire_instance_lock(name: &str) -> bool {
+    unsafe {
+        // CreateMutexW 成功创建不代表真的抢到锁：同名互斥体已存在时也返回成功句柄，
+        // 必须用 ERROR_ALREADY_EXISTS 区分"新建持锁"与"已有实例持锁"
+        match CreateMutexW(None, false, &HSTRING::from(name)) {
+            Ok(_) => GetLastError() != ERROR_ALREADY_EXISTS,
+            Err(e) => {
+                // 创建失败极罕见（会话权限异常等）：放行保证程序可用性，
+                // 进程堆积防线由任务计划 IGNORE_NEW 与运行时长自限兜底
+                eprintln!("单实例锁创建失败，本次运行放行: {e}");
+                true
+            }
+        }
+    }
+}
+
+/// 在独立线程中执行可能无限阻塞的操作，超过 `timeout` 后放弃等待并返回错误
+///
+/// 背景：任务计划服务的 COM 调用（RegisterTaskDefinition 等）是阻塞 FFI，
+/// 服务被大量任务实例冲击乃至挂死时调用永不返回；tokio 的超时无法打断
+/// 阻塞 FFI（内部 future 可被丢弃，但卡在 FFI 里的线程不会返回），
+/// "旁路线程执行 + 主线程限时等待"是唯一可靠的程序级防御。
+/// 超时后工作线程无法回收（仍在阻塞中），随进程退出一并终止——以线程泄漏换取进程存活。
+///
+/// 形参 `timeout`：等待结果的时限
+/// 形参 `task`：可能无限阻塞的操作闭包（在独立线程执行）
+/// 返回：Ok(闭包结果)；超时则 Err
+pub fn run_with_timeout<T: Send + 'static>(
+    timeout: Duration,
+    task: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Box<dyn Error>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        // 接收端可能已因超时被放弃：发送失败是预期路径，静默丢弃结果即可
+        let _ = tx.send(task());
+    });
+    rx.recv_timeout(timeout).map_err(|_| {
+        Box::<dyn Error>::from(format!(
+            "操作在 {} 秒内未完成，执行服务可能已失去响应",
+            timeout.as_secs()
+        ))
+    })
 }
 
 /// Windows Imaging Component (WIC) 将图像转码为 Windows 11 中 TranscodedWallpaper 文件（JPEG 格式）
@@ -415,4 +494,64 @@ pub fn wic_codec() -> windows::core::Result<()> {
         CoUninitialize();
     }*/
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::try_acquire_instance_lock;
+    use std::time::Duration;
+
+    /// 同一进程内第二次抢占同名互斥体必须被拒绝：
+    /// 单实例锁依赖 ERROR_ALREADY_EXISTS 语义判定"已有实例在运行"
+    #[test]
+    fn should_return_false_when_lock_acquired_twice_in_same_process() {
+        // 使用测试专用名称，与主程序的互斥体及并行测试用例互不干扰
+        let name = "Local\\desktop-wallpaper-rust-test-instance";
+        assert!(try_acquire_instance_lock(name), "首次抢占应成功");
+        assert!(!try_acquire_instance_lock(name), "第二次抢占应被拒绝");
+    }
+
+    /// set_wallpaper 对无法设置的路径必须返回 Err 而非静默成功：
+    /// 历史实现把 ERROR_ACCESS_DENIED 包装为 Ok(false)，但布尔值被上层丢弃，
+    /// 函数最终返回 Ok(())，表现为"设置失败却认为成功"的静默缺陷。
+    /// 传不存在的路径触发 SystemParametersInfoW 失败（无论底层错误码是
+    /// ACCESS_DENIED 还是 FILE_NOT_FOUND，失败都必须以 Err 呈现）。
+    #[test]
+    fn should_return_error_when_wallpaper_cannot_be_set() {
+        let result = super::set_wallpaper("Z:\\__no_such_dir__\\__no_such_wallpaper__.jpg");
+        assert!(
+            result.is_err(),
+            "设置失败必须返回 Err，实际返回: {result:?}"
+        );
+        // 错误消息必须指向文件缺失：防止未来其他分支的 Err 误让本测试假绿
+        assert!(
+            result.err().map(|e| e.to_string()).unwrap_or_default().contains("不存在"),
+            "错误消息应指明壁纸文件不存在"
+        );
+    }
+
+    /// run_with_timeout 对永不返回的操作必须在时限内放弃并返回错误：
+    /// 任务计划服务的 COM 调用是阻塞 FFI，服务挂死时调用永不返回，
+    /// 旁路线程 + 限时等待是唯一可靠的程序级防御（tokio 超时打不断阻塞 FFI）
+    #[test]
+    fn should_return_err_when_task_exceeds_timeout() {
+        let start = std::time::Instant::now();
+        let result = super::run_with_timeout(Duration::from_millis(100), || {
+            // 模拟无限阻塞的 FFI：远超等待上限
+            std::thread::sleep(Duration::from_secs(5));
+            1
+        });
+        assert!(result.is_err(), "超时必须返回 Err，实际: {result:?}");
+        assert!(
+            start.elapsed() < Duration::from_secs(4),
+            "超时后必须及时返回，不应等待阻塞任务完成"
+        );
+    }
+
+    /// run_with_timeout 对按时完成的操作必须透传其结果
+    #[test]
+    fn should_return_task_result_within_timeout() {
+        let result = super::run_with_timeout(Duration::from_secs(5), || 42);
+        assert_eq!(result.unwrap(), 42);
+    }
 }

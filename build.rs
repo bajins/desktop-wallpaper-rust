@@ -1,17 +1,8 @@
-use std::env;
 use std::fs;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufWriter;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use winit::{
-    event::{ WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window},
-    // window::{WindowBuilder},
-};
-use image::{ImageBuffer, Luma, DynamicImage, GenericImageView};
+use std::path::Path;
 use ico::{IconDir};
 
 fn main() {
@@ -21,9 +12,21 @@ fn main() {
         let ico_path = "assets/icon1.ico";
         png_to_ico("assets/icon1_1.png", ico_path).ok();
         // 创建Windows资源文件
-        let mut res = winres::WindowsResource::new();
+        let mut res = winresource::WindowsResource::new();
         res.set_icon(ico_path);
         res.set_manifest_file("assets/manifest.xml");
+        // ===== 版本资源信息（资源管理器右键 → 属性 → 详细信息面板）=====
+        // FileVersion/ProductVersion（含 VS_FIXEDFILEINFO 数字版块）由 new() 默认从
+        // CARGO_PKG_* 环境变量（即 Cargo.toml [package].version）读取，此处不重复设置，
+        // 保证版本号单一来源，升版只改 Cargo.toml 即可
+        res.set("FileDescription", "桌面壁纸自动更换");
+        res.set("ProductName", "Desktop Wallpaper");
+        res.set("CompanyName", "Bajins");
+        res.set("LegalCopyright", "Copyright (C) Bajins");
+        res.set("OriginalFilename", "desktop-wallpaper-rust.exe");
+        res.set("Comments", "https://github.com/bajins/desktop-wallpaper-rust");
+        // 资源语言：简体中文（0x0804），详细信息面板按此语言显示字符串
+        res.set_language(0x0804);
         res.compile().ok();
         // 删除生成的ICO图标文件
         match fs::remove_file(ico_path) {
