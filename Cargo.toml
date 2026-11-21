@@ -1,7 +1,7 @@
 [package]
 name = "desktop-wallpaper-rust"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 #[[bin]]
 #name = "desktop-wallpaper-rust"
@@ -22,10 +22,8 @@ panic = "abort"
 # https://github.com/seanmonstar/reqwest
 # 默认 features 保持启用（charset/http2/system-proxy），0.13 默认 TLS 即 rustls，无需显式指定
 reqwest = "0.13.3"
-# https://github.com/serde-rs/serde
-serde = { version = "1.0.228" }
 # https://github.com/serde-rs/json
-serde_json = "1.0.150"
+serde_json = "1.0.154"
 # https://github.com/tokio-rs/tokio
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros", "time"] }
 # https://github.com/servo/rust-url
@@ -34,7 +32,7 @@ url = "2.5.8"
 clap = { version = "4.6.1", features = ["cargo"] }
 rand = { version = "0.10.1", features = [] }
 #select = "0.6.0"
-scraper = "0.27.0"
+scraper = "0.29.0"
 #rustls = "0.23.4"
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -47,7 +45,7 @@ features = ["Data_Xml_Dom", "Win32_Foundation", "Win32_Security", "Win32_System_
 [build-dependencies]
 winresource = "0.1.31"
 image = "0.25.10"
-ico = "0.5.0"
+ico = "0.6.0"
 
 #[package.metadata.winres]
 #OriginalFilename = "desktop-wallpaper-rust.exe"

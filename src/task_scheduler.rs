@@ -141,7 +141,7 @@ pub fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
     let exe_path = env::current_exe()?;
     let exe_path_str = exe_path
         .to_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     // 将所有 Windows API 操作放进一个闭包中
     // 闭包的返回值强制指定为 windows::core::Result<()>
@@ -666,11 +666,10 @@ pub fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
             // 避免任务场景无人点击阻塞弹窗导致进程挂死堆积
             exec_action.SetArguments(&BSTR::from("--scheduled"))?;
             // 起始于 (Start in)
-            if let Some(parent) = exe_path.parent() {
-                if let Some(dir_str) = parent.to_str() {
+            if let Some(parent) = exe_path.parent()
+                && let Some(dir_str) = parent.to_str() {
                     exec_action.SetWorkingDirectory(&BSTR::from(dir_str))?;
                 }
-            }
 
             // ==========================================
             // 4. 条件 (Conditions)
@@ -784,9 +783,7 @@ pub fn create_schedule() -> Result<(), Box<dyn std::error::Error>> {
                     &VARIANT::default(), // &empty_var // Password
                     logon_type,          // LogonType
                     &VARIANT::default(), // sddl
-                )
-                // .map(|_| ()) // 把 IRegisteredTask 转成 ()
-                .map_err(|e| e)?;
+                )?;
             /*.map_err(|e| {
                 windows::core::Error::new(
                     windows::Win32::Foundation::S_FALSE,
@@ -909,7 +906,7 @@ pub fn add_to_startup(
 ///
 /// 形参 `code`：Win32 注册表 API 返回的错误码
 fn hresult_error(code: WIN32_ERROR) -> Box<dyn std::error::Error> {
-    windows::core::Error::from_hresult(HRESULT::from_win32(code.0 as u32))
+    windows::core::Error::from_hresult(HRESULT::from_win32(code.0))
         .to_string()
         .into()
 }

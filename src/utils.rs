@@ -40,10 +40,7 @@ pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
         let result =
             InternetCheckConnectionW(PCWSTR(url_wide.as_ptr()), FLAG_ICC_FORCE_CONNECTION, 0);
         // 用 match 捕获异常
-        match result {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        result.is_ok()
     };
 
     // 方式2：使用 Windows API 函数 InternetGetConnectedState
@@ -63,10 +60,7 @@ pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
     let _is_alive = unsafe {
         let result = IsNetworkAlive(&mut 0);
         // 用 match 捕获异常
-        match result {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        result.is_ok()
     };
 
     // 方式4：使用 Windows API 函数 GetConnectivity
@@ -108,7 +102,11 @@ pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
         // 第一次调用 GetAdaptersInfo 函数来获取所需的缓冲区大小
         GetAdaptersInfo(adapter_info, &mut out_buf_len);
         // Allocate memory for the buffer
-        adapter_info = Some(std::mem::transmute(std::alloc::alloc(
+        // transmute 显式标注转换类型：裸字节指针 → IP_ADAPTER_INFO 结构体指针
+        adapter_info = Some(std::mem::transmute::<
+            *mut u8,
+            *mut IP_ADAPTER_INFO,
+        >(std::alloc::alloc(
             std::alloc::Layout::from_size_align_unchecked(
                 out_buf_len as usize,
                 std::mem::align_of::<IP_ADAPTER_INFO>(),
@@ -117,7 +115,7 @@ pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
         // Second call to GetAdaptersInfo to get the actual data
         GetAdaptersInfo(adapter_info, &mut out_buf_len);
         // Access the adapter info
-        let adapter_info = adapter_info.ok_or_else(|| std::io::Error::last_os_error())?;
+        let adapter_info = adapter_info.ok_or_else(std::io::Error::last_os_error)?;
         // Iterate over the linked list of IP_ADAPTER_INFO structures
         /*while !adapter_info.is_null() {
             let adapter = &*adapter_info;
@@ -130,8 +128,9 @@ pub fn is_connected() -> Result<bool, Box<dyn std::error::Error>> {
             adapter_info = adapter.Next;
         }*/
         // Free the allocated memory
+        // transmute 显式标注转换类型：结构体指针 → 裸字节指针（与 alloc 对称）
         std::alloc::dealloc(
-            std::mem::transmute(adapter_info),
+            std::mem::transmute::<*mut IP_ADAPTER_INFO, *mut u8>(adapter_info),
             std::alloc::Layout::from_size_align_unchecked(
                 out_buf_len as usize,
                 std::mem::align_of::<IP_ADAPTER_INFO>(),

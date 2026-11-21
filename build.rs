@@ -29,10 +29,7 @@ fn main() {
         res.set_language(0x0804);
         res.compile().ok();
         // 删除生成的ICO图标文件
-        match fs::remove_file(ico_path) {
-            Err(e) => println!("文件删除错误: {}", e),
-            Ok(_) => {}
-        }
+        if let Err(e) = fs::remove_file(ico_path) { println!("文件删除错误: {}", e) }
 
         // 编译`.rc`文件生成`.res`文件
         /*Command::new("windres")

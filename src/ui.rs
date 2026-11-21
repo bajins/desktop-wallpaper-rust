@@ -44,40 +44,43 @@ pub fn show_message(text: &str, caption: &str, style: MESSAGEBOX_STYLE) {
 
 // ── 线程本地存储：帮助回调需要知道当前 URL ──
 thread_local! {
-    static CURRENT_HELP_URL: RefCell<String> = RefCell::new(String::new());
+    static CURRENT_HELP_URL: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 // ── 内部回调（不对外暴露） ──
+// edition 2024 起 `unsafe fn` 函数体不再隐式成为 unsafe 上下文，需显式 `unsafe {}` 包裹
 unsafe extern "system" fn help_callback(lphelpinfo: *mut HELPINFO) {
-    if lphelpinfo.is_null() {
-        return;
-    }
-    // if let Some(info) = lphelpinfo.as_ref() {
-    // 根据 dwContextId 决定打开哪个页面
-    /*let url = match (*lphelpinfo).dwContextId {
-        1001 => w!("https://github.com/bajins/desktop-wallpaper-rust"),
-        1002 => w!("https://github.com/bajins/desktop-wallpaper-rust"),
-        _ => w!("https://github.com/bajins/desktop-wallpaper-rust"),
-    };*/
-
-    CURRENT_HELP_URL.with(|url| {
-        let url_str = url.borrow();
-        let url_h = HSTRING::from(url_str.as_str());
-
-        // ShellExecuteW 打开 URL
-        let se = ShellExecuteW(
-            None,                   // 窗口句柄
-            w!("open"),             // 操作 (打开)
-            PCWSTR(url_h.as_ptr()), // 要打开的URL/文件
-            None,                   // 参数
-            None,                   // lpDirectory
-            SW_SHOWNORMAL,          // 显示状态
-        );
-
-        if se.is_invalid() {
-            show_error("打开帮助失败")
+    unsafe {
+        if lphelpinfo.is_null() {
+            return;
         }
-    });
+        // if let Some(info) = lphelpinfo.as_ref() {
+        // 根据 dwContextId 决定打开哪个页面
+        /*let url = match (*lphelpinfo).dwContextId {
+            1001 => w!("https://github.com/bajins/desktop-wallpaper-rust"),
+            1002 => w!("https://github.com/bajins/desktop-wallpaper-rust"),
+            _ => w!("https://github.com/bajins/desktop-wallpaper-rust"),
+        };*/
+
+        CURRENT_HELP_URL.with(|url| {
+            let url_str = url.borrow();
+            let url_h = HSTRING::from(url_str.as_str());
+
+            // ShellExecuteW 打开 URL
+            let se = ShellExecuteW(
+                None,                   // 窗口句柄
+                w!("open"),             // 操作 (打开)
+                PCWSTR(url_h.as_ptr()), // 要打开的URL/文件
+                None,                   // 参数
+                None,                   // lpDirectory
+                SW_SHOWNORMAL,          // 显示状态
+            );
+
+            if se.is_invalid() {
+                show_error("打开帮助失败")
+            }
+        });
+    }
 }
 
 // ── 对外暴露的枚举 ──
@@ -200,11 +203,10 @@ pub fn refresh_desktop_shcn() {
 fn find_desktop_defview() -> Option<HWND> {
     unsafe {
         // 1) Progman -> SHELLDLL_DefView
-        if let Ok(progman) = FindWindowW(w!("Progman"), None) {
-            if let Ok(dv) = FindWindowExW(Some(progman), None, w!("SHELLDLL_DefView"), None) {
+        if let Ok(progman) = FindWindowW(w!("Progman"), None)
+            && let Ok(dv) = FindWindowExW(Some(progman), None, w!("SHELLDLL_DefView"), None) {
                 return Some(dv);
             }
-        }
 
         // 2) 退化路径: 遍历所有 WorkerW，查找其下的 SHELLDLL_DefView
         let mut worker: Option<HWND> = None;

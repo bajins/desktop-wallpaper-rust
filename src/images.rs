@@ -48,7 +48,7 @@ pub async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
         "https://www.bing.com{}",
         v["images"][0]["url"]
             .as_str()
-            .ok_or_else(|| std::io::Error::last_os_error())?
+            .ok_or_else(std::io::Error::last_os_error)?
     );
     // 解析URL
     let parsed = Url::parse(&image_url)?;
@@ -59,12 +59,12 @@ pub async fn get_bing_image_url() -> Result<(String, String), Box<dyn Error>> {
     let id = parsed
         .query_pairs()
         .find(|(key, _)| key == "id")
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     println!("{:?}", id.1);
     let rf = parsed
         .query_pairs()
         .find(|(key, _)| key == "rf")
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     println!("{:?}", rf.1);
 
     Ok((image_url, rf.1.to_string()))
@@ -89,11 +89,11 @@ pub async fn get_spotlight_image_url() -> Result<(String, String), Box<dyn Error
     let item: Value = serde_json::from_str(
         v["batchrsp"]["items"][0]["item"]
             .as_str()
-            .ok_or_else(|| std::io::Error::last_os_error())?,
+            .ok_or_else(std::io::Error::last_os_error)?,
     )?;
     let image_url = item["ad"]["landscapeImage"]["asset"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     println!("{:?}", item["ad"]["description"]);
 
@@ -114,36 +114,34 @@ pub async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn E
     let response = builder.send().await?;
     // 检查响应状态码
     if response.status() != StatusCode::OK {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(Box::new(io::Error::other(
             "请求获取版本失败",
         )));
     }
     let body = response.text().await?;
     // println!("{:?}", body);
     // 解析HTML
-    let document = Html::parse_document(&*body);
+    let document = Html::parse_document(&body);
     let head_selector = Selector::parse("head")?;
     let head = document
         .select(&head_selector)
         .next()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     let dcs = head
         .value()
         .attr("data-client-settings")
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     if dcs.is_empty() {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(Box::new(io::Error::other(
             "解析HTML并获取版本信息失败",
         )));
     }
     // 解析JSON
-    let body_json: Value = serde_json::from_str(&dcs)?;
+    let body_json: Value = serde_json::from_str(dcs)?;
     println!("{:?}", body_json);
     let version = body_json["bundleInfo"]["v"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     // 壁纸API的URL
     let api_url = "https://assets.msn.cn/resolver/api/resolve/v3/config/\
@@ -156,14 +154,14 @@ pub async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn E
     let v: Value = serde_json::from_str(&body)?;
     let datas = v["configs"]["BackgroundImageWC/default"]["properties"]["cmsImage"]["data"]
         .as_array()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     println!("{:?}", datas);
     // 随机获取一张图片
     let mut rng = rand::rng();
     let num = rng.random_range(0..datas.len());
     let data_map = datas[num]["image"]
         .as_object()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     // 获取分辨率最大的图片
     let image = data_map
         .iter()
@@ -173,7 +171,7 @@ pub async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn E
     let mut image_url = v["configs"]["StickyPeek/default"]["properties"]
         ["stickyPeekLightCoachmarkMainImageURL"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     // 截取URL的路径
     match image_url.rfind("/") {
         Some(index) => image_url = &image_url[0..index + 1],
@@ -184,9 +182,9 @@ pub async fn get_edge_chromium_image_url() -> Result<(String, String), Box<dyn E
         "{}{}",
         image_url,
         image
-            .ok_or_else(|| std::io::Error::last_os_error())?
+            .ok_or_else(std::io::Error::last_os_error)?
             .as_str()
-            .ok_or_else(|| std::io::Error::last_os_error())?
+            .ok_or_else(std::io::Error::last_os_error)?
     );
 
     println!("{:?}", data_map);
@@ -206,13 +204,13 @@ pub async fn get_pixabay_image_url() -> Result<(String, String), Box<dyn Error>>
     let v: Value = serde_json::from_str(&body)?;
     let img_infos = v["hits"]
         .as_array()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     // 随机获取一张图片
     let mut rng = rand::rng();
     let num = rng.random_range(0..img_infos.len());
     let image_url = img_infos[num]["largeImageURL"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     println!("{:?}", image_url);
 
@@ -230,7 +228,7 @@ pub async fn get_iciba_image_url() -> Result<(String, String), Box<dyn Error>> {
     let v: Value = serde_json::from_str(&body)?;
     let image_url = v["picture2"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     println!("{:?}", image_url);
 
@@ -308,7 +306,7 @@ pub async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Err
     let body = response.text().await?;
     println!("{:?}", body);
     // 解析HTML
-    let document = Html::parse_document(&*body);
+    let document = Html::parse_document(&body);
     let a_selector = Selector::parse("div.center a")?;
     let img_selector = Selector::parse("picture img")?;
     let img: Vec<_> = document.select(&img_selector).collect();
@@ -319,10 +317,10 @@ pub async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Err
         let image_url = a
             .value()
             .attr("href")
-            .ok_or_else(|| std::io::Error::last_os_error())?;
+            .ok_or_else(std::io::Error::last_os_error)?;
         println!("{}", image_url);
         // 解析URL
-        let parsed = Url::parse(&image_url)?;
+        let parsed = Url::parse(image_url)?;
         // 获取查询参数
         /*for (key, value) in parsed.query_pairs() {
             println!("{}: {}", key, value);
@@ -330,13 +328,12 @@ pub async fn get_alphacoders_image_url() -> Result<(String, String), Box<dyn Err
         let id = parsed
             .query_pairs()
             .find(|(key, _)| key == "i")
-            .ok_or_else(|| std::io::Error::last_os_error())?;
+            .ok_or_else(std::io::Error::last_os_error)?;
         println!("{:?}", id.1);
         img_ids.push(id.1.to_string());
     }
     if img_ids.is_empty() {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(Box::new(io::Error::other(
             "解析HTML并获取版本信息失败",
         )));
     }
@@ -407,16 +404,15 @@ pub async fn get_nasa_image_url() -> Result<(String, String), Box<dyn Error>> {
     let v: Value = serde_json::from_str(&body)?;
     let media_type = v["media_type"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
     if media_type != "image" {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(Box::new(io::Error::other(
             format!("媒体类型不是图片: {media_type}"),
         )));
     }
     let image_url = v["hdurl"]
         .as_str()
-        .ok_or_else(|| std::io::Error::last_os_error())?;
+        .ok_or_else(std::io::Error::last_os_error)?;
 
     println!("{:?}", image_url);
 
